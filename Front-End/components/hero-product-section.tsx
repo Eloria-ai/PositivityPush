@@ -4,10 +4,19 @@ import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Star, Clock } from "lucide-react"
 import { useState } from "react"
+import { redirectToStripe, getPlanDetails, type PlanType } from "@/lib/stripe"
 
 export function HeroProductSection() {
-  const [selectedPlan, setSelectedPlan] = useState("6-month")
+  const [selectedPlan, setSelectedPlan] = useState<PlanType>("6-month")
   const [currentSlide, setCurrentSlide] = useState(0)
+  
+  // Handle checkout using the Stripe utility
+  const handleCheckout = () => {
+    redirectToStripe(selectedPlan)
+  }
+  
+  // Get current plan details
+  const currentPlan = getPlanDetails(selectedPlan)
 
   const slides = [
     {
@@ -205,8 +214,11 @@ export function HeroProductSection() {
             </div>
 
             {/* Add to Bag Button */}
-            <Button className="w-full h-14 bg-[#00C48C] hover:bg-[#00A876] text-white font-bold text-lg rounded-xl">
-              💖 START MY PLAN — RISK-FREE
+            <Button 
+              onClick={handleCheckout}
+              className="w-full h-14 bg-[#00C48C] hover:bg-[#00A876] text-white font-bold text-lg rounded-xl"
+            >
+              💖 START MY {currentPlan.displayName} PLAN — RISK-FREE
             </Button>
 
             {/* Trust Badges */}
@@ -437,8 +449,11 @@ export function HeroProductSection() {
             </div>
 
             {/* Add to Bag Button */}
-            <Button className="w-full h-14 bg-[#00C48C] hover:bg-[#00A876] text-white font-bold text-lg rounded-xl">
-              💖 START MY PLAN — RISK-FREE
+            <Button 
+              onClick={handleCheckout}
+              className="w-full h-14 bg-[#00C48C] hover:bg-[#00A876] text-white font-bold text-lg rounded-xl"
+            >
+              💖 START MY {currentPlan.displayName} PLAN — RISK-FREE
             </Button>
 
             {/* Trust Badges */}

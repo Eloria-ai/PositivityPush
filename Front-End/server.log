@@ -1,0 +1,89 @@
+
+> my-v0-project@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.2.4
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.120:3000
+   - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 1627ms
+ ○ Compiling / ...
+ ✓ Compiled / in 3.3s (809 modules)
+ ✓ Compiled in 854ms (366 modules)
+ GET / 200 in 4209ms
+ ○ Compiling /success ...
+ ✓ Compiled /success in 675ms (868 modules)
+ GET /success?session_id=TEST123 200 in 834ms
+ ✓ Compiled in 327ms (381 modules)
+ ✓ Compiled in 197ms (381 modules)
+ GET /success?session_id=TEST123 200 in 27ms
+ ✓ Compiled in 200ms (381 modules)
+ GET /success?session_id=TEST123 200 in 29ms
+ ✓ Compiled in 204ms (381 modules)
+ GET /success?session_id=TEST123 200 in 17ms
+ ✓ Compiled in 234ms (381 modules)
+ GET /success?session_id=TEST123 200 in 12ms
+ ✓ Compiled in 193ms (381 modules)
+ GET /success?session_id=TEST123 200 in 13ms
+ ✓ Compiled in 262ms (381 modules)
+ GET /success?session_id=TEST123 200 in 15ms
+ ✓ Compiled in 185ms (381 modules)
+ GET /success?session_id=TEST123 200 in 17ms
+ GET / 200 in 183ms
+ ✓ Compiled in 240ms (381 modules)
+ GET / 200 in 56ms
+ ✓ Compiled in 276ms (381 modules)
+ GET / 200 in 36ms
+ ✓ Compiled in 229ms (381 modules)
+ GET / 200 in 27ms
+   Reload env: .env.local
+ ✓ Compiled in 2.3s (891 modules)
+ GET / 200 in 101ms
+ ✓ Compiled in 364ms (381 modules)
+ GET / 200 in 46ms
+ ✓ Compiled in 183ms (381 modules)
+ GET / 200 in 41ms
+ ✓ Compiled in 180ms (381 modules)
+ GET / 200 in 28ms
+ ✓ Compiled in 833ms (882 modules)
+ GET / 200 in 79ms
+ ✓ Compiled in 160ms (381 modules)
+ GET / 200 in 31ms
+ ✓ Compiled in 410ms (882 modules)
+ GET / 200 in 127ms
+ ✓ Compiled in 165ms (381 modules)
+ GET / 200 in 28ms
+ ✓ Compiled in 454ms (381 modules)
+ GET / 200 in 47ms
+ ✓ Compiled in 139ms (381 modules)
+ GET / 200 in 105ms
+ ✓ Compiled in 173ms (381 modules)
+ GET / 200 in 72ms
+ ✓ Compiled in 593ms (882 modules)
+ ✓ Compiled in 239ms (381 modules)
+ GET / 200 in 269ms
+ GET / 200 in 31ms
+ ✓ Compiled in 143ms (381 modules)
+ GET / 200 in 30ms
+ ✓ Compiled in 380ms (884 modules)
+ GET / 200 in 92ms
+ ✓ Compiled in 334ms (382 modules)
+ GET / 200 in 51ms
+ ✓ Compiled in 143ms (382 modules)
+ GET / 200 in 33ms
+ ✓ Compiled in 711ms (884 modules)
+ GET / 200 in 75ms
+ ✓ Compiled in 149ms (382 modules)
+ GET / 200 in 33ms
+ ✓ Compiled in 133ms (382 modules)
+ GET / 200 in 36ms
+ ✓ Compiled in 190ms (382 modules)
+ GET / 200 in 63ms
+ ✓ Compiled in 181ms (382 modules)
+ GET / 200 in 24ms
+ ✓ Compiled in 156ms (382 modules)
+ GET / 200 in 38ms
+ ✓ Compiled in 184ms (382 modules)
+ GET / 200 in 25ms
