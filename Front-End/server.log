@@ -87,3 +87,70 @@
  GET / 200 in 38ms
  ✓ Compiled in 184ms (382 modules)
  GET / 200 in 25ms
+ ✓ Compiled in 181ms (382 modules)
+ GET / 200 in 31ms
+ GET / 200 in 187ms
+ ✓ Compiled in 192ms (382 modules)
+ GET / 200 in 25ms
+ ✓ Compiled in 106ms (382 modules)
+ GET / 200 in 24ms
+ ✓ Compiled in 222ms (382 modules)
+ GET / 200 in 23ms
+ ✓ Compiled in 191ms (382 modules)
+ GET / 200 in 33ms
+ ✓ Compiled in 164ms (382 modules)
+ GET / 200 in 28ms
+ ✓ Compiled in 169ms (382 modules)
+ GET / 200 in 29ms
+ ✓ Compiled in 160ms (382 modules)
+ GET / 200 in 21ms
+ ✓ Compiled in 146ms (382 modules)
+ GET / 200 in 29ms
+ ✓ Compiled in 171ms (382 modules)
+ GET / 200 in 35ms
+ ✓ Compiled in 153ms (382 modules)
+ GET / 200 in 23ms
+ ✓ Compiled in 226ms (382 modules)
+ GET / 200 in 33ms
+ ✓ Compiled in 220ms (382 modules)
+ GET / 200 in 28ms
+ ✓ Compiled in 169ms (382 modules)
+ GET / 200 in 26ms
+ ✓ Compiled in 186ms (382 modules)
+ GET / 200 in 28ms
+ ✓ Compiled in 162ms (382 modules)
+ GET / 200 in 24ms
+ ✓ Compiled in 177ms (382 modules)
+ GET / 200 in 28ms
+ ✓ Compiled in 165ms (382 modules)
+ GET / 200 in 28ms
+ ✓ Compiled in 157ms (382 modules)
+ GET / 200 in 29ms
+ ✓ Compiled in 172ms (382 modules)
+ GET / 200 in 22ms
+ ✓ Compiled in 176ms (382 modules)
+ GET / 200 in 34ms
+ ✓ Compiled in 156ms (382 modules)
+ GET / 200 in 22ms
+ ✓ Compiled in 196ms (382 modules)
+ GET / 200 in 38ms
+ ✓ Compiled in 193ms (382 modules)
+ GET / 200 in 26ms
+ ✓ Compiled in 175ms (382 modules)
+ GET / 200 in 29ms
+ ✓ Compiled in 224ms (382 modules)
+ GET / 200 in 34ms
+ ✓ Compiled in 526ms (382 modules)
+ GET / 200 in 29ms
+ ✓ Compiled in 1169ms (382 modules)
+ ✓ Compiled in 334ms (382 modules)
+ GET / 200 in 814ms
+   Reload env: .env.local
+ ✓ Compiled in 785ms (870 modules)
+ GET / 200 in 901ms
+ ✓ Compiled in 395ms (382 modules)
+ GET / 200 in 220ms
+ ✓ Compiled in 853ms (382 modules)
+ ✓ Compiled in 226ms (382 modules)
+ ✓ Compiled in 561ms (382 modules)
+ GET /success?session_id={CHECKOUT_SESSION_ID} 200 in 467ms
