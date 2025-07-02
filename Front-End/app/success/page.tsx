@@ -53,7 +53,7 @@ function SuccessPageContent() {
               <CheckCircle className="w-8 h-8 text-green-600" />
             </div>
             <CardTitle className="text-3xl font-bold text-gray-900">
-              Payment Successful! 🎉
+              🔥 VERCEL BUILD TEST 🔥 Payment Successful! 🎉
             </CardTitle>
             <CardDescription className="text-lg mt-2">
               Welcome to Positivity Push! Let's activate your personal AI coach.
@@ -64,7 +64,7 @@ function SuccessPageContent() {
             {/* Instructions */}
             <div className="bg-blue-50 rounded-lg p-6 text-center">
               <h3 className="font-semibold text-lg mb-4 text-blue-900">
-                🚀 DEPLOYMENT TEST v2.0: Activate Your AI Coach in 2 Steps:
+                🚀 Activate Your AI Coach in 2 Steps:
               </h3>
               <div className="space-y-3 text-left max-w-md mx-auto">
                 <div className="flex items-start gap-3">
