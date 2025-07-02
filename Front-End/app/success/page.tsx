@@ -50,7 +50,7 @@ function SuccessPageContent() {
               <CheckCircle className="w-8 h-8 text-green-600" />
             </div>
             <CardTitle className="text-3xl font-bold text-gray-900">
-              Payment Successful! 🎉
+              🚀 NEW VERSION - Payment Successful! 🎉
             </CardTitle>
             <CardDescription className="text-lg mt-2">
               Welcome to Positivity Push! Let's activate your personal AI coach.
