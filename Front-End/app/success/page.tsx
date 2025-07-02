@@ -137,7 +137,7 @@ function SuccessPageContent() {
                 {/* Simple instruction */}
                 <div className="bg-gray-50 p-3 rounded-lg text-center">
                   <p className="text-sm text-gray-600">
-                    Click the button above to automatically open WhatsApp with your activation message ready to send!
+                    Click the button above to automatically open WhatsApp with your activation message ready to send! 🚀
                   </p>
                 </div>
               </div>
