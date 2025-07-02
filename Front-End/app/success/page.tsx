@@ -113,11 +113,21 @@ function SuccessPageContent() {
                   <p className="text-sm text-gray-600 mb-3">
                     This will open WhatsApp with your activation message ready! 🚀
                   </p>
-                  <div className="bg-white p-3 rounded border border-gray-200">
+                  <div 
+                    className="bg-white p-3 rounded border border-gray-200"
+                    style={{ overflow: 'hidden', wordBreak: 'break-word' }}
+                  >
                     <p className="text-xs text-gray-500 mb-1">Message preview:</p>
-                    <p className="text-sm font-mono text-gray-800 break-all overflow-wrap-anywhere">
+                    <div 
+                      className="text-sm font-mono text-gray-800"
+                      style={{ 
+                        wordBreak: 'break-all', 
+                        overflowWrap: 'break-word',
+                        maxWidth: '100%'
+                      }}
+                    >
                       {activationMessage}
-                    </p>
+                    </div>
                   </div>
                 </div>
               </div>
