@@ -50,7 +50,7 @@ function SuccessPageContent() {
               <CheckCircle className="w-8 h-8 text-green-600" />
             </div>
             <CardTitle className="text-3xl font-bold text-gray-900">
-              🚀 NEW VERSION - Payment Successful! 🎉
+              Payment Successful! 🎉
             </CardTitle>
             <CardDescription className="text-lg mt-2">
               Welcome to Positivity Push! Let's activate your personal AI coach.
@@ -110,9 +110,15 @@ function SuccessPageContent() {
                 </a>
                 
                 <div className="mt-6 bg-gray-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-gray-600 mb-3">
                     This will open WhatsApp with your activation message ready! 🚀
                   </p>
+                  <div className="bg-white p-3 rounded border border-gray-200">
+                    <p className="text-xs text-gray-500 mb-1">Message preview:</p>
+                    <p className="text-sm font-mono text-gray-800 break-all overflow-wrap-anywhere">
+                      {activationMessage}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
