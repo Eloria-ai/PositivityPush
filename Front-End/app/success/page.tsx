@@ -137,15 +137,15 @@ function SuccessPageContent() {
                 {/* Copy activation message */}
                 <div className="bg-gray-50 p-3 rounded-lg">
                   <p className="text-xs text-gray-600 mb-2">Activation Message:</p>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 text-sm bg-white p-2 rounded border text-left">
+                  <div className="flex items-start gap-2">
+                    <code className="flex-1 text-xs bg-white p-3 rounded border text-left break-all overflow-hidden leading-relaxed">
                       {activationMessage}
                     </code>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={copyToClipboard}
-                      className="flex-shrink-0"
+                      className="flex-shrink-0 mt-1"
                     >
                       {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                     </Button>
