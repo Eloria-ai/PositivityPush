@@ -8,6 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { CheckCircle, MessageCircle, Smartphone } from "lucide-react"
 import Link from "next/link"
 
+// Force this page to be dynamically rendered, not statically cached
+export const dynamic = 'force-dynamic'
+
 function SuccessPageContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("session_id")
