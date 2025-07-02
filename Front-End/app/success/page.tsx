@@ -1,32 +1,21 @@
 "use client"
 
-import { Suspense, useEffect, useState } from "react"
+import { Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { QRCodeSVG } from "qrcode.react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { CheckCircle, MessageCircle, Smartphone, Copy, Check } from "lucide-react"
+import { CheckCircle, MessageCircle, Smartphone } from "lucide-react"
 import Link from "next/link"
 
 function SuccessPageContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("session_id")
-  const [copied, setCopied] = useState(false)
   
   // TODO: Replace with actual WhatsApp business number from environment
   const whatsappNumber = process.env.NEXT_PUBLIC_WA_BUSINESS_NUMBER || "1234567890"
   const activationMessage = `POSITIVITY-PUSH START ${sessionId || "DEMO"}`
   const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(activationMessage)}`
-
-  const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(activationMessage)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error("Failed to copy text: ", err)
-    }
-  }
 
   if (!sessionId) {
     return (
