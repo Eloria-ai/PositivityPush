@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { CheckCircle, MessageCircle, Smartphone } from "lucide-react"
 import Link from "next/link"
 
-// Force this page to be dynamically rendered, not statically cached
+// NUCLEAR REBUILD - Force fresh deployment
 export const dynamic = 'force-dynamic'
 
 function SuccessPageContent() {
@@ -53,7 +53,7 @@ function SuccessPageContent() {
               <CheckCircle className="w-8 h-8 text-green-600" />
             </div>
             <CardTitle className="text-3xl font-bold text-gray-900">
-              🔥 VERCEL BUILD TEST 🔥 Payment Successful! 🎉
+              🎉 CLEAN BUILD SUCCESS - Payment Complete! 🎉
             </CardTitle>
             <CardDescription className="text-lg mt-2">
               Welcome to Positivity Push! Let's activate your personal AI coach.
@@ -61,10 +61,10 @@ function SuccessPageContent() {
           </CardHeader>
 
           <CardContent className="space-y-8">
-            {/* Instructions */}
+            {/* Clean Instructions - NO MESSAGE PREVIEW BOX */}
             <div className="bg-blue-50 rounded-lg p-6 text-center">
               <h3 className="font-semibold text-lg mb-4 text-blue-900">
-                🚀 Activate Your AI Coach in 2 Steps:
+                🚀 Activate Your AI Coach in 2 Simple Steps:
               </h3>
               <div className="space-y-3 text-left max-w-md mx-auto">
                 <div className="flex items-start gap-3">
@@ -78,7 +78,7 @@ function SuccessPageContent() {
               </div>
             </div>
 
-            {/* Mobile-First Design */}
+            {/* Mobile-First Design - NO MESSAGE PREVIEW */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {/* QR Code Section */}
               <div className="text-center order-2 md:order-1">
@@ -99,7 +99,7 @@ function SuccessPageContent() {
                 </p>
               </div>
 
-              {/* WhatsApp Button Section */}
+              {/* WhatsApp Button Section - CLEAN, NO PREVIEW */}
               <div className="text-center order-1 md:order-2">
                 <h4 className="font-semibold mb-4 flex items-center justify-center gap-2 text-gray-700">
                   <MessageCircle className="w-5 h-5" />
