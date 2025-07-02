@@ -108,28 +108,6 @@ function SuccessPageContent() {
                     Activate AI Coach
                   </Button>
                 </a>
-                
-                <div className="mt-6 bg-gray-50 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600 mb-3">
-                    This will open WhatsApp with your activation message ready! 🚀
-                  </p>
-                  <div 
-                    className="bg-white p-3 rounded border border-gray-200"
-                    style={{ overflow: 'hidden', wordBreak: 'break-word' }}
-                  >
-                    <p className="text-xs text-gray-500 mb-1">Message preview:</p>
-                    <div 
-                      className="text-sm font-mono text-gray-800"
-                      style={{ 
-                        wordBreak: 'break-all', 
-                        overflowWrap: 'break-word',
-                        maxWidth: '100%'
-                      }}
-                    >
-                      {activationMessage}
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
 
