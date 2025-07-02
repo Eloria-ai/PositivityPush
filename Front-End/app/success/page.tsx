@@ -64,7 +64,7 @@ function SuccessPageContent() {
             {/* Instructions */}
             <div className="bg-blue-50 rounded-lg p-6 text-center">
               <h3 className="font-semibold text-lg mb-4 text-blue-900">
-                🚀 Activate Your AI Coach in 2 Steps:
+                🚀 DEPLOYMENT TEST v2.0: Activate Your AI Coach in 2 Steps:
               </h3>
               <div className="space-y-3 text-left max-w-md mx-auto">
                 <div className="flex items-start gap-3">
