@@ -192,3 +192,29 @@
  GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 67ms
  ✓ Compiled in 152ms (382 modules)
  GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 11ms
+ ✓ Compiled in 192ms (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 14ms
+ ✓ Compiled in 358ms (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 53ms
+ ✓ Compiled in 138ms (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 10ms
+ ✓ Compiled in 159ms (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 12ms
+ ✓ Compiled in 341ms (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 55ms
+ ✓ Compiled in 2.2s (382 modules)
+ ✓ Compiled in 511ms (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 439ms
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 173ms
+ ✓ Compiled in 2.8s (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 69ms
+ ✓ Compiled in 546ms (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 32ms
+ ✓ Compiled in 329ms (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 23ms
+ ✓ Compiled in 170ms (382 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 13ms
+ ✓ Compiled in 1040ms (880 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 82ms
+ ✓ Compiled in 157ms (380 modules)
+ GET /success?session_id=%7BCHECKOUT_SESSION_ID%7D 200 in 11ms

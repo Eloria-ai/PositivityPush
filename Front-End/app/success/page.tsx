@@ -134,32 +134,10 @@ function SuccessPageContent() {
                   </Button>
                 </a>
                 
-                {/* Copy activation message */}
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <p className="text-xs text-gray-600 mb-2">Activation Message:</p>
-                  <div className="flex items-start gap-2">
-                    <code 
-                      className="flex-1 text-xs bg-white p-3 rounded border text-left leading-relaxed"
-                      style={{ 
-                        wordBreak: 'break-all',
-                        overflowWrap: 'anywhere',
-                        maxWidth: '0',
-                        minWidth: '0'
-                      }}
-                    >
-                      {activationMessage}
-                    </code>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={copyToClipboard}
-                      className="flex-shrink-0 mt-1"
-                    >
-                      {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    </Button>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    You can copy this message and paste it manually in WhatsApp if needed
+                {/* Simple instruction */}
+                <div className="bg-gray-50 p-3 rounded-lg text-center">
+                  <p className="text-sm text-gray-600">
+                    Click the button above to automatically open WhatsApp with your activation message ready to send!
                   </p>
                 </div>
               </div>
