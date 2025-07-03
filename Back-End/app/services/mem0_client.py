@@ -1,184 +1,117 @@
 """
 mem0 Memory Service for Positivity Push
-Manages personalized user context and conversation memory.
+Manages personalized user context and conversation memory using the new MemoryClient.
 """
 
-import httpx
-import json
 import logging
 from typing import Dict, Any, List, Optional
+from mem0 import MemoryClient
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 class Mem0Service:
-    """Service class for mem0 memory management"""
+    """Service class for mem0 memory management using MemoryClient"""
     
     def __init__(self):
-        self.base_url = settings.MEM0_URL or "https://api.mem0.ai"
-        self.headers = {
-            "Authorization": f"Bearer {settings.MEM0_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        if not settings.MEM0_API_KEY or settings.MEM0_API_KEY == "your-mem0-api-key":
+            logger.warning("mem0 API key not configured - memory features disabled")
+            self.client = None
+        else:
+            try:
+                self.client = MemoryClient(api_key=settings.MEM0_API_KEY)
+                logger.info("mem0 client initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize mem0 client: {e}")
+                self.client = None
     
     async def add_memory(
         self, 
+        messages: List[Dict[str, str]], 
         user_id: str, 
-        message: str, 
         metadata: Optional[Dict[str, Any]] = None
     ) -> bool:
-        """Add memory for user"""
+        """Add conversation messages to memory for a user"""
+        if not self.client:
+            logger.warning("mem0 client not available - skipping memory add")
+            return False
+            
         try:
-            async with httpx.AsyncClient() as client:
-                payload = {
-                    "user_id": user_id,
-                    "message": message,
-                    "metadata": metadata or {}
-                }
-                
-                response = await client.post(
-                    f"{self.base_url}/memories",
-                    headers=self.headers,
-                    json=payload,
-                    timeout=30.0
-                )
-                
-                if response.status_code in [200, 201]:
-                    logger.info(f"Memory added for user {user_id}")
-                    return True
-                else:
-                    logger.error(f"Failed to add memory: {response.text}")
-                    return False
-                    
+            # Use the correct mem0 API format - user_id is REQUIRED
+            result = self.client.add(
+                messages, 
+                user_id=user_id,
+                metadata=metadata or {}
+            )
+            
+            # Check if memories were successfully added
+            success = False
+            if isinstance(result, dict) and 'results' in result:
+                success = len(result['results']) > 0
+                logger.info(f"Memory added for user {user_id}: {len(result['results'])} memories created")
+            else:
+                logger.warning(f"Unexpected mem0 response format: {result}")
+            
+            return success
+            
         except Exception as e:
-            logger.error(f"Error adding memory to mem0: {e}")
+            logger.error(f"Failed to add memory for user {user_id}: {e}")
             return False
     
-    async def get_memories(
-        self, 
-        user_id: str, 
-        limit: int = 10
-    ) -> str:
-        """Get user memories as formatted string"""
+    async def get_memories(self, user_id: str, query: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get relevant memories for a user"""
+        if not self.client:
+            logger.warning("mem0 client not available - returning empty memories")
+            return []
+            
         try:
-            async with httpx.AsyncClient() as client:
-                params = {
-                    "user_id": user_id,
-                    "limit": limit
-                }
-                
-                response = await client.get(
-                    f"{self.base_url}/memories",
-                    headers=self.headers,
-                    params=params,
-                    timeout=30.0
-                )
-                
-                if response.status_code == 200:
-                    memories = response.json().get("memories", [])
-                    
-                    # Format memories into readable context
-                    if memories:
-                        memory_text = "\\n".join([
-                            f"- {memory.get('message', '')}" 
-                            for memory in memories
-                        ])
-                        logger.info(f"Retrieved {len(memories)} memories for user {user_id}")
-                        return memory_text
-                    else:
-                        return ""
-                else:
-                    logger.error(f"Failed to get memories: {response.text}")
-                    return ""
-                    
+            if query:
+                # Search for specific memories - returns a list directly
+                result = self.client.search(query, user_id=user_id)
+            else:
+                # Get all memories for user - returns a list directly
+                result = self.client.get_all(user_id=user_id)
+            
+            # The result is already a list of memory objects
+            if isinstance(result, list):
+                memories = result
+            else:
+                logger.warning(f"Unexpected mem0 response format: {result}")
+                memories = []
+            
+            logger.info(f"Retrieved {len(memories)} memories for user {user_id}")
+            return memories
+            
         except Exception as e:
-            logger.error(f"Error getting memories from mem0: {e}")
-            return ""
-    
-    async def search_memories(
-        self, 
-        user_id: str, 
-        query: str, 
-        limit: int = 5
-    ) -> List[Dict[str, Any]]:
-        """Search user memories with query"""
-        try:
-            async with httpx.AsyncClient() as client:
-                payload = {
-                    "user_id": user_id,
-                    "query": query,
-                    "limit": limit
-                }
-                
-                response = await client.post(
-                    f"{self.base_url}/memories/search",
-                    headers=self.headers,
-                    json=payload,
-                    timeout=30.0
-                )
-                
-                if response.status_code == 200:
-                    results = response.json().get("results", [])
-                    logger.info(f"Found {len(results)} memories for query: {query}")
-                    return results
-                else:
-                    logger.error(f"Failed to search memories: {response.text}")
-                    return []
-                    
-        except Exception as e:
-            logger.error(f"Error searching memories: {e}")
+            logger.error(f"Failed to get memories for user {user_id}: {e}")
             return []
     
-    async def update_memory(
-        self, 
-        memory_id: str, 
-        message: str, 
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """Update existing memory"""
-        try:
-            async with httpx.AsyncClient() as client:
-                payload = {
-                    "message": message,
-                    "metadata": metadata or {}
-                }
-                
-                response = await client.put(
-                    f"{self.base_url}/memories/{memory_id}",
-                    headers=self.headers,
-                    json=payload,
-                    timeout=30.0
-                )
-                
-                if response.status_code == 200:
-                    logger.info(f"Memory {memory_id} updated")
-                    return True
-                else:
-                    logger.error(f"Failed to update memory: {response.text}")
-                    return False
-                    
-        except Exception as e:
-            logger.error(f"Error updating memory: {e}")
-            return False
+    async def add_conversation(self, user_id: str, user_message: str, assistant_response: str) -> bool:
+        """Add a conversation exchange to memory"""
+        messages = [
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": assistant_response}
+        ]
+        return await self.add_memory(messages, user_id)
     
-    async def delete_user_memories(self, user_id: str) -> bool:
-        """Delete all memories for a user (GDPR compliance)"""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.delete(
-                    f"{self.base_url}/memories/users/{user_id}",
-                    headers=self.headers,
-                    timeout=30.0
-                )
-                
-                if response.status_code in [200, 204]:
-                    logger.info(f"All memories deleted for user {user_id}")
-                    return True
-                else:
-                    logger.error(f"Failed to delete user memories: {response.text}")
-                    return False
-                    
-        except Exception as e:
-            logger.error(f"Error deleting user memories: {e}")
-            return False
+    async def get_user_context(self, user_id: str) -> str:
+        """Get formatted user context for AI prompts"""
+        memories = await self.get_memories(user_id)
+        
+        if not memories:
+            return "No previous context available."
+        
+        # Format memories for AI context
+        context_parts = []
+        for memory in memories[-10:]:  # Last 10 memories
+            if isinstance(memory, dict):
+                # mem0 stores the actual memory text in 'memory' field
+                content = memory.get('memory', memory.get('content', memory.get('text', str(memory))))
+                context_parts.append(f"- {content}")
+        
+        return "Previous context:\n" + "\n".join(context_parts)
+    
+    def is_available(self) -> bool:
+        """Check if mem0 service is available"""
+        return self.client is not None

@@ -12,9 +12,14 @@ from dotenv import load_dotenv
 
 from app.routers import stripe_webhook, whatsapp_webhook
 from app.config import settings
+from app.logging_config import setup_logging, get_logger
 
 # Load environment variables
 load_dotenv()
+
+# Setup logging
+setup_logging()
+logger = get_logger("app.main")
 
 # Create FastAPI app
 app = FastAPI(
@@ -24,6 +29,23 @@ app = FastAPI(
     docs_url="/docs" if settings.ENVIRONMENT == "development" else None,
     redoc_url="/redoc" if settings.ENVIRONMENT == "development" else None,
 )
+
+# Production middleware
+from app.middleware import (
+    RequestLoggingMiddleware, 
+    SecurityHeadersMiddleware, 
+    RateLimitingMiddleware,
+    HealthCheckMiddleware
+)
+
+# Add production middleware
+app.add_middleware(HealthCheckMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+
+# Rate limiting in production
+if settings.ENVIRONMENT == "production":
+    app.add_middleware(RateLimitingMiddleware, calls_per_minute=100)
 
 # CORS middleware for frontend integration
 app.add_middleware(

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # Application Settings
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    PORT: int = int(os.getenv("PORT", "8000"))
     
     # Security
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")

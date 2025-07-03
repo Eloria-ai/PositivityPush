@@ -52,9 +52,13 @@ class AICoachService:
             welcome_msg = response.choices[0].message.content.strip()
             
             # Store initial interaction in mem0
+            welcome_messages = [
+                {"role": "system", "content": "User activated subscription"},
+                {"role": "assistant", "content": welcome_msg}
+            ]
             await self.mem0_service.add_memory(
+                messages=welcome_messages,
                 user_id=subscription["id"],
-                message=f"User just activated subscription. Sent welcome message: {welcome_msg}",
                 metadata={"interaction_type": "welcome", "plan_type": subscription.get("plan_type")}
             )
             
@@ -97,9 +101,13 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
             ai_response = response.choices[0].message.content.strip()
             
             # Store interaction in mem0
+            conversation_messages = [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": ai_response}
+            ]
             await self.mem0_service.add_memory(
+                messages=conversation_messages,
                 user_id=user_id,
-                message=f"User said: {message}. Coach responded: {ai_response}",
                 metadata={"interaction_type": "conversation"}
             )
             
@@ -142,9 +150,13 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
             affirmation = response.choices[0].message.content.strip()
             
             # Store in mem0
+            affirmation_messages = [
+                {"role": "system", "content": "Daily affirmation generated"},
+                {"role": "assistant", "content": affirmation}
+            ]
             await self.mem0_service.add_memory(
+                messages=affirmation_messages,
                 user_id=user_id,
-                message=f"Sent daily affirmation: {affirmation}",
                 metadata={"interaction_type": "daily_affirmation", "date": datetime.now().isoformat()}
             )
             
@@ -186,9 +198,13 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
             prompt = response.choices[0].message.content.strip()
             
             # Store in mem0
+            gratitude_messages = [
+                {"role": "system", "content": "Gratitude prompt generated"},
+                {"role": "assistant", "content": prompt}
+            ]
             await self.mem0_service.add_memory(
+                messages=gratitude_messages,
                 user_id=user_id,
-                message=f"Sent gratitude prompt: {prompt}",
                 metadata={"interaction_type": "gratitude_prompt", "date": datetime.now().isoformat()}
             )
             
