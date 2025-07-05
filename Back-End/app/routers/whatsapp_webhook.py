@@ -52,25 +52,42 @@ async def whatsapp_webhook(
     """
     
     try:
-        payload = await request.json()
-        logger.info(f"Received WhatsApp webhook: {json.dumps(payload, indent=2)}")
+        # Handle Twilio webhook format (form data)
+        form_data = await request.form()
+        logger.info(f"Received Twilio WhatsApp webhook: {dict(form_data)}")
         
         # Initialize services
         supabase_service = SupabaseService(db)
         whatsapp_service = WhatsAppService()
         ai_coach = AICoachService()
         
-        # Process webhook payload
-        if payload.get("object") == "whatsapp_business_account":
-            for entry in payload.get("entry", []):
-                for change in entry.get("changes", []):
-                    if change.get("field") == "messages":
-                        await process_message(
-                            change["value"], 
-                            supabase_service, 
-                            whatsapp_service, 
-                            ai_coach
-                        )
+        # Extract message data from Twilio format
+        message_body = form_data.get("Body", "")
+        from_number = form_data.get("From", "")
+        to_number = form_data.get("To", "")
+        
+        # Clean phone numbers (remove "whatsapp:" prefix)
+        from_number = from_number.replace("whatsapp:", "") if from_number else ""
+        to_number = to_number.replace("whatsapp:", "") if to_number else ""
+        
+        logger.info(f"Message from {from_number}: {message_body}")
+        
+        if message_body and from_number:
+            # Look up subscription once here
+            subscription = await supabase_service.get_subscription_by_wa_id(from_number)
+            logger.info(f"SUBSCRIPTION LOOKUP for '{from_number}': {subscription is not None}")
+            if subscription:
+                logger.info(f"Found subscription ID: {subscription.get('id')}, Status: {subscription.get('status')}")
+            
+            await process_twilio_message(
+                message_body,
+                from_number,
+                to_number,
+                subscription,
+                supabase_service,
+                whatsapp_service,
+                ai_coach
+            )
         
         return JSONResponse(content={"status": "success"})
         
@@ -112,6 +129,30 @@ async def process_message(
             await handle_coaching_message(
                 wa_id, message_text, message_id, supabase_service, whatsapp_service, ai_coach
             )
+
+async def process_twilio_message(
+    message_body: str,
+    from_number: str,
+    to_number: str,
+    subscription: dict,
+    supabase_service: SupabaseService,
+    whatsapp_service: WhatsAppService,
+    ai_coach: AICoachService
+):
+    """Process message from Twilio WhatsApp webhook"""
+    
+    logger.info(f"Processing Twilio message from {from_number}: {message_body}")
+    
+    # Check if this is an activation message
+    if message_body.startswith("POSITIVITY-PUSH START"):
+        await handle_activation_message(
+            from_number, message_body, supabase_service, whatsapp_service, ai_coach
+        )
+    else:
+        # Handle regular coaching conversation - pass the subscription we already found
+        await handle_coaching_message_with_subscription(
+            from_number, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach
+        )
 
 async def handle_activation_message(
     wa_id: str,
@@ -178,6 +219,64 @@ async def handle_activation_message(
             "❌ Something went wrong during activation. Please contact support."
         )
 
+async def handle_coaching_message_with_subscription(
+    wa_id: str,
+    message_text: str,
+    message_id: str,
+    subscription: dict,
+    supabase_service: SupabaseService,
+    whatsapp_service: WhatsAppService,
+    ai_coach: AICoachService
+):
+    """
+    Handle regular coaching conversation messages with pre-fetched subscription
+    Generate AI responses based on user context
+    """
+    
+    try:
+        # Check if subscription exists and is active
+        if not subscription or subscription.get("status") != "active":
+            await whatsapp_service.send_message(
+                wa_id,
+                "❌ No active subscription found. Please complete your payment first at https://positivity-push.vercel.app"
+            )
+            return
+        
+        # Log conversation
+        await supabase_service.log_conversation(
+            subscription["id"],
+            message_text,
+            "user",
+            message_id
+        )
+        
+        # Generate AI response
+        ai_response = await ai_coach.generate_response(
+            user_id=subscription["id"],
+            message=message_text,
+            user_context=subscription
+        )
+        
+        # Send AI response
+        await whatsapp_service.send_message(wa_id, ai_response)
+        
+        # Log AI response
+        await supabase_service.log_conversation(
+            subscription["id"],
+            ai_response,
+            "assistant",
+            None
+        )
+        
+        logger.info(f"Successfully handled coaching message for {wa_id}")
+        
+    except Exception as e:
+        logger.error(f"Error in coaching conversation: {e}")
+        await whatsapp_service.send_message(
+            wa_id,
+            "❌ Something went wrong. Please try again or contact support."
+        )
+
 async def handle_coaching_message(
     wa_id: str,
     message_text: str,
@@ -187,7 +286,7 @@ async def handle_coaching_message(
     ai_coach: AICoachService
 ):
     """
-    Handle regular coaching conversation messages
+    Handle regular coaching conversation messages (legacy function)
     Generate AI responses based on user context
     """
     

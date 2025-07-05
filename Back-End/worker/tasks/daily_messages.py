@@ -24,6 +24,67 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @shared_task(bind=True, max_retries=3)
+def send_daily_accountability_checkin(self, timezone='UTC'):
+    """
+    Send personalized daily accountability check-ins to users
+    Ask about their goals: gym, habits, work progress, etc.
+    """
+    logger.info(f"Starting daily accountability check-ins for timezone: {timezone}")
+    
+    try:
+        return asyncio.run(_send_daily_accountability_async(timezone))
+    except Exception as e:
+        logger.error(f"Error in daily accountability task: {e}")
+        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+async def _send_daily_accountability_async(timezone):
+    """Async implementation of daily accountability check-ins"""
+    
+    # Initialize services
+    db = get_supabase_client()
+    supabase_service = SupabaseService(db)
+    ai_coach = AICoachService()
+    whatsapp_service = WhatsAppService()
+    
+    # Get active subscribers for accountability check-ins
+    active_users = supabase_service.get_active_subscribers_for_timezone(timezone)
+    
+    successful_sends = 0
+    failed_sends = 0
+    
+    for user in active_users:
+        try:
+            # Generate personalized accountability check-in
+            user_context = {
+                "email": user.get("email"),
+                "plan_type": user.get("plan_type"),
+                "goals": user.get("personal_goals"),
+                "challenges": user.get("active_challenges")
+            }
+            
+            # AI generates personalized accountability message
+            accountability_message = await ai_coach.generate_accountability_checkin(
+                user["id"], 
+                user_context
+            )
+            
+            # Send via WhatsApp
+            if user.get("wa_id"):
+                await whatsapp_service.send_message(
+                    to=user["wa_id"],
+                    message=accountability_message
+                )
+                successful_sends += 1
+                logger.info(f"Accountability check-in sent to user {user['id']}")
+            
+        except Exception as e:
+            logger.error(f"Failed to send accountability check-in to user {user['id']}: {e}")
+            failed_sends += 1
+    
+    logger.info(f"Accountability check-ins completed. Success: {successful_sends}, Failed: {failed_sends}")
+    return {"successful": successful_sends, "failed": failed_sends}
+
+@shared_task(bind=True, max_retries=3)
 def send_morning_affirmations(self, timezone='UTC'):
     """
     Send personalized morning affirmations to active users

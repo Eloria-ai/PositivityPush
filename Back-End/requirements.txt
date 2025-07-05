@@ -24,7 +24,7 @@ requests==2.31.0
 httpx>=0.24.0,<0.25.0
 
 # AI Memory & Context
-mem0ai==0.0.8
+mem0ai==0.1.113
 
 # Email Service
 sendgrid==6.11.0

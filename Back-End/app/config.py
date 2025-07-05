@@ -38,10 +38,10 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
     
-    # WhatsApp Business API Settings
-    WA_TOKEN: str = os.getenv("WA_TOKEN", "")
-    WA_PHONE_ID: str = os.getenv("WA_PHONE_ID", "")
-    WA_BUSINESS_NUMBER: str = os.getenv("WA_BUSINESS_NUMBER", "1234567890")
+    # Twilio WhatsApp Settings
+    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+    TWILIO_WHATSAPP_NUMBER: str = os.getenv("TWILIO_WHATSAPP_NUMBER", "+14155238886")
     WA_WEBHOOK_VERIFY_TOKEN: str = os.getenv("WA_WEBHOOK_VERIFY_TOKEN", "")
     
     # OpenAI Settings

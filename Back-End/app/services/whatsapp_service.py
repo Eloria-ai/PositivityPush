@@ -1,49 +1,58 @@
 """
 WhatsApp Service for Positivity Push
-Handles WhatsApp Cloud API communication for sending messages.
+Handles Twilio WhatsApp API communication for sending messages.
 """
 
 import httpx
 import json
 import logging
 from typing import Dict, Any, Optional
+import base64
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 class WhatsAppService:
-    """Service class for WhatsApp Cloud API operations"""
+    """Service class for Twilio WhatsApp API operations"""
     
     def __init__(self):
-        self.base_url = f"https://graph.facebook.com/v18.0/{settings.WA_PHONE_ID}"
+        self.base_url = f"https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}"
+        # Twilio uses Basic Auth with Account SID and Auth Token
+        credentials = f"{settings.TWILIO_ACCOUNT_SID}:{settings.TWILIO_AUTH_TOKEN}"
+        encoded_credentials = base64.b64encode(credentials.encode()).decode()
+        
         self.headers = {
-            "Authorization": f"Bearer {settings.WA_TOKEN}",
-            "Content-Type": "application/json"
+            "Authorization": f"Basic {encoded_credentials}",
+            "Content-Type": "application/x-www-form-urlencoded"
         }
     
     async def send_message(self, to: str, message: str) -> bool:
-        """Send text message via WhatsApp"""
+        """Send text message via Twilio WhatsApp"""
         try:
             async with httpx.AsyncClient() as client:
+                # Twilio WhatsApp format: whatsapp:+1234567890
+                formatted_to = f"whatsapp:{to}" if not to.startswith("whatsapp:") else to
+                formatted_from = f"whatsapp:{settings.TWILIO_WHATSAPP_NUMBER}"
+                
+                # Twilio uses form data
                 payload = {
-                    "messaging_product": "whatsapp",
-                    "to": to,
-                    "type": "text",
-                    "text": {"body": message}
+                    "From": formatted_from,
+                    "To": formatted_to,
+                    "Body": message
                 }
                 
                 response = await client.post(
-                    f"{self.base_url}/messages",
+                    f"{self.base_url}/Messages.json",
                     headers=self.headers,
-                    json=payload
+                    data=payload  # Form data, not JSON
                 )
                 
-                if response.status_code == 200:
+                if response.status_code in [200, 201]:
                     logger.info(f"Message sent successfully to {to}")
                     return True
                 else:
-                    logger.error(f"Failed to send message: {response.text}")
+                    logger.error(f"Failed to send message: {response.status_code} - {response.text}")
                     return False
                     
         except Exception as e:
