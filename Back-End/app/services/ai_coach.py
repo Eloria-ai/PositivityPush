@@ -13,6 +13,7 @@ from app.config import settings
 from app.services.mem0_client import Mem0Service
 from app.services.psychological_framework import PsychologicalFramework, PsychologicalProfile
 from app.services.enhanced_prompts import EnhancedPromptEngine
+from app.services.specialized_coaches import CoachType
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +81,12 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
         message: str, 
         user_context: Dict[str, Any]
     ) -> str:
-        """Generate psychologically-informed AI coach response"""
+        """Generate psychologically-informed AI coach response with enhanced error handling"""
+        start_time = datetime.now()
+        
         try:
-            # Get user's memory/context from mem0
-            user_memories = await self.mem0_service.get_memories(user_id)
+            # Get user's memory/context from mem0 with timeout
+            user_memories = await self._safe_get_memories(user_id)
             
             # Create psychological profile (simplified for now)
             user_profile = self._build_psychological_profile(user_context, user_memories)
@@ -98,14 +101,32 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
                 psychological_analysis, user_profile
             )
             
-            # Create enhanced prompt with psychological insights
-            enhanced_prompt = self.prompt_engine.generate_enhanced_prompt(
-                user_message=message,
-                psychological_analysis=psychological_analysis,
-                response_strategy=response_strategy,
-                user_context=user_context,
-                conversation_history=user_memories
+            # Detect if we should use a specialized coach
+            current_hour = datetime.now().hour
+            coach_type = self.prompt_engine.detect_coaching_scenario(
+                message, user_memories, current_hour
             )
+            
+            # Use specialized coach prompt or fallback to enhanced prompt
+            if coach_type != CoachType.ALWAYS_ON:
+                logger.info(f"Using specialized coach: {coach_type.value} for user {user_id}")
+                enhanced_prompt = self.prompt_engine.get_specialized_coach_prompt(
+                    coach_type=coach_type,
+                    user_context=user_context,
+                    conversation_history=user_memories
+                )
+            else:
+                # Use enhanced psychological prompt for general conversations
+                enhanced_prompt = self.prompt_engine.generate_enhanced_prompt(
+                    user_message=message,
+                    psychological_analysis=psychological_analysis,
+                    response_strategy=response_strategy,
+                    user_context=user_context,
+                    conversation_history=user_memories
+                )
+            
+            # Debug: Log the prompt being sent to OpenAI
+            logger.info(f"Sending prompt to OpenAI (first 200 chars): {enhanced_prompt[:200]}...")
             
             # Generate AI response using enhanced prompt
             response = self.openai_client.chat.completions.create(
@@ -126,9 +147,10 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
                 {"role": "assistant", "content": ai_response}
             ]
             
-            # Enhanced metadata with psychological insights
+            # Enhanced metadata with psychological insights and coach type
             metadata = {
                 "interaction_type": "conversation",
+                "coach_type": coach_type.value,
                 "emotional_state": [state.value for state in psychological_analysis.get("emotional_state", [])],
                 "cognitive_patterns": [pattern.value for pattern in psychological_analysis.get("cognitive_patterns", [])],
                 "motivation_level": psychological_analysis.get("motivation_level", 5),
@@ -137,19 +159,22 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
                 "timestamp": datetime.now().isoformat()
             }
             
-            await self.mem0_service.add_memory(
-                messages=conversation_messages,
-                user_id=user_id,
-                metadata=metadata
-            )
+            await self._enhance_memory_storage(conversation_messages, user_id, metadata)
             
             logger.info(f"Generated response using {response_strategy.get('primary_technique')} for user {user_id}")
+            
+            # Log performance
+            response_time = (datetime.now() - start_time).total_seconds()
+            logger.info(f"Response generated in {response_time:.2f}s using {coach_type.value} coach for user {user_id}")
             
             return ai_response
             
         except Exception as e:
-            logger.error(f"Error generating enhanced AI response: {e}")
-            return "I'm taking a moment to really understand what you're sharing. Could you try again? I'm here to support you with whatever you're going through. 💙"
+            response_time = (datetime.now() - start_time).total_seconds()
+            logger.error(f"Error generating AI response after {response_time:.2f}s: {e}")
+            
+            # Provide contextual fallback based on message sentiment
+            return self._get_fallback_response(message)
     
     async def generate_daily_affirmation(
         self, 
@@ -350,3 +375,46 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
             growth_mindset_level=7,  # Default
             self_efficacy_areas={"general": 6}  # Default
         )
+    
+    async def _safe_get_memories(self, user_id: str) -> List[Dict]:
+        """Safely get user memories with error handling and timeout"""
+        try:
+            # Add timeout for memory retrieval
+            memories = await self.mem0_service.get_memories(user_id)
+            return memories if memories else []
+        except Exception as e:
+            logger.warning(f"Error retrieving memories for user {user_id}: {e}")
+            return []  # Return empty list to continue processing
+    
+    def _get_fallback_response(self, message: str) -> str:
+        """Generate contextual fallback response based on message sentiment"""
+        message_lower = message.lower()
+        
+        # Detect message sentiment and provide appropriate fallback
+        if any(word in message_lower for word in ['sad', 'depressed', 'down', 'low', 'terrible']):
+            return "I hear that you're going through a tough time. Your feelings are completely valid. I'm here to support you through this. What's one small thing that might bring you a bit of comfort right now? 💙"
+        
+        elif any(word in message_lower for word in ['anxious', 'worried', 'stressed', 'overwhelmed']):
+            return "That sounds really stressful. Take a deep breath with me - you don't have to carry this alone. What's one thing you can control in this situation right now? 🌱"
+        
+        elif any(word in message_lower for word in ['motivation', 'goal', 'want to', 'trying']):
+            return "I can hear your desire to grow and move forward - that's already a strength! What's one tiny step you could take today toward what you want? Even the smallest action counts. ✨"
+        
+        elif any(word in message_lower for word in ['tired', 'exhausted', 'burned out']):
+            return "It sounds like you've been pushing yourself hard. Rest isn't giving up - it's recharging. What's one gentle thing you could do for yourself right now? 🌙"
+        
+        else:
+            # General supportive fallback
+            return "I'm here with you. Sometimes things feel complicated, but you don't have to figure it all out at once. What's on your heart right now? 💙"
+    
+    async def _enhance_memory_storage(self, conversation_messages: List[Dict], user_id: str, metadata: Dict) -> None:
+        """Enhanced memory storage with better error handling"""
+        try:
+            await self.mem0_service.add_memory(
+                messages=conversation_messages,
+                user_id=user_id,
+                metadata=metadata
+            )
+        except Exception as e:
+            logger.error(f"Error storing memory for user {user_id}: {e}")
+            # Continue without storing - don't break the conversation flow

@@ -4,42 +4,41 @@ Evidence-based prompt engineering for therapeutic effectiveness
 """
 
 from typing import Dict, List, Any, Optional
+from datetime import datetime
 from app.services.psychological_framework import PsychologicalFramework, PsychologicalProfile
+from app.services.specialized_coaches import SpecializedCoaches, CoachType, CoachingContext
 
 class EnhancedPromptEngine:
     """Advanced prompt engineering with psychological principles"""
     
     def __init__(self):
         self.framework = PsychologicalFramework()
+        self.specialized_coaches = SpecializedCoaches()
         self.base_personality = self._create_base_personality()
         self.therapeutic_techniques = self._load_therapeutic_techniques()
         
     def _create_base_personality(self) -> str:
-        """Core AI coach personality based on therapeutic best practices"""
-        return """You are a highly skilled AI life coach trained in evidence-based psychology, neuroscience, and behavioral science. Your approach combines:
+        """AI mindset coach inspired by Wysa, Woebot, and Youper"""
+        return """You are **Positivity Push**, an AI mindset coach for WhatsApp inspired by top apps Wysa, Woebot, and Youper.
 
-CORE PERSONALITY:
-- Warm, empathetic, and genuinely caring - but never fake or overly positive
-- Skilled in active listening and emotional validation
-- Curious and insightful, asking powerful questions that promote self-discovery
-- Grounded in cognitive behavioral therapy, positive psychology, and neuroscience
-- Celebrates small wins while helping users think bigger
-- Matches user's communication style while gently challenging limiting beliefs
+GOALS  
+• Sound like a thoughtful human, not a script.  
+• Offer empathy first, insight second, tiny action last.  
+• Keep replies under ~90 words; shorter is fine.  
+• End with a natural encouragement or light emoji (not every time).
 
-THERAPEUTIC APPROACH:
-- Always validate emotions before offering solutions
-- Use Socratic questioning to help users discover their own insights
-- Apply CBT techniques for cognitive restructuring when needed
-- Leverage neuroplasticity principles to reinforce positive changes
-- Focus on behavioral activation and small, actionable steps
-- Build self-efficacy through strengths-based coaching
+BEST-PRACTICE FLOW  (flexible—skip / reorder if it feels robotic)  
+1. Brief emotional validation (≤ 15 words).  
+2. One curious follow-up or reframe that invites reflection.  
+3. Suggest a micro-step that can be done in ≤ 2 minutes.  
+4. Close with genuine support (emoji optional).
 
-COMMUNICATION STYLE:
-- Responses under 100 words unless deep exploration is needed
-- Ask one powerful question per response to maintain engagement
-- Use "implementation intentions" (if-then planning) for behavior change
-- Mirror user's language patterns while introducing growth-oriented reframes
-- Balance support with gentle accountability"""
+STYLE  
+• Warm, conversational, non-clinical.  
+• Vary phrasing; avoid repeating the same opener twice in a row.  
+• Use contractions ("I'm", "you'll").  
+• One question max per message.  
+• No numbered lists."""
 
     def _load_therapeutic_techniques(self) -> Dict[str, Dict]:
         """Therapeutic response templates"""
@@ -112,65 +111,81 @@ COMMUNICATION STYLE:
         user_context: Dict[str, Any],
         conversation_history: List[Dict[str, Any]]
     ) -> str:
-        """Generate psychologically-informed prompt"""
+        """Generate streamlined, high-impact prompt"""
         
-        # Extract user profile elements
-        user_goals = user_context.get('personal_goals', {})
-        communication_style = user_context.get('communication_style', {})
-        plan_type = user_context.get('plan_type', '3_month')
+        # Extract key psychological data
+        emotions = [state.value for state in psychological_analysis.get('emotional_state', [])]
+        patterns = [pattern.value for pattern in psychological_analysis.get('cognitive_patterns', [])]
         
-        # Build memory context
-        memory_insights = self._extract_memory_insights(conversation_history)
+        # Build JSON psychological state
+        psych_state = {
+            "emotion": emotions[0] if emotions else "NEUTRAL",
+            "pattern": patterns[0] if patterns else "NONE", 
+            "motivation": psychological_analysis.get('motivation_level', 5),
+            "technique": response_strategy.get('primary_technique', 'supportive')
+        }
         
-        # Select appropriate therapeutic approach
-        therapeutic_approach = self._select_therapeutic_approach(psychological_analysis, response_strategy)
+        # Extract top 3 memory snippets
+        memory_snippets = self._get_top_memory_snippets(conversation_history)
         
-        # Build the enhanced prompt
+        # Build the streamlined prompt
         prompt = f"""{self.base_personality}
 
-USER PSYCHOLOGICAL PROFILE:
-- Emotional State: {', '.join([state.value for state in psychological_analysis.get('emotional_state', [])])}
-- Cognitive Patterns: {', '.join([pattern.value for pattern in psychological_analysis.get('cognitive_patterns', [])])}
-- Motivation Level: {psychological_analysis.get('motivation_level', 5)}/10
-- Change Readiness: {psychological_analysis.get('readiness_for_change', 'unknown')}
-- Behavioral Cues: {psychological_analysis.get('behavioral_cues', {})}
+CONTEXT BLOCKS  
+<PSYCH_STATE>  
+{psych_state}             # {{"emotion":"{emotions[0] if emotions else 'NEUTRAL'}","pattern":"{patterns[0] if patterns else 'NONE'}"}}  
 
-THERAPEUTIC STRATEGY FOR THIS RESPONSE:
-- Primary Technique: {response_strategy.get('primary_technique', 'supportive_coaching')}
-- Emotional Validation: {response_strategy.get('emotional_validation', 'general_empathy')}
-- Cognitive Intervention: {response_strategy.get('cognitive_intervention', 'none')}
-- Behavioral Focus: {response_strategy.get('behavioral_suggestion', 'exploration')}
-- Motivational Approach: {response_strategy.get('motivational_approach', 'supportive')}
+<MEMORY>  
+{memory_snippets}            # • "🔥 5-day streak" • "Win: client email Monday"  
 
-USER CONTEXT & GOALS:
-- Subscription Plan: {plan_type}
-- Personal Goals: {user_goals}
-- Communication Preference: {communication_style}
-- Email: {user_context.get('email', 'Not provided')}
+<USER>  
+{user_message}                # e.g. "I always mess everything up"
 
-{memory_insights}
+---  (everything above is hidden from the user)  ---
 
-CONVERSATION CONTEXT:
-{self._format_recent_conversation(conversation_history)}
-
-CURRENT MESSAGE TO RESPOND TO:
-"{user_message}"
-
-{therapeutic_approach}
-
-RESPONSE GUIDELINES:
-1. Start with emotional validation using the exact strategy: {response_strategy.get('emotional_validation')}
-2. Apply the therapeutic technique: {response_strategy.get('primary_technique')}
-3. Include one specific, actionable suggestion based on their readiness level
-4. Ask one powerful question that promotes self-discovery
-5. Keep response under 100 words unless deeper exploration is warranted
-6. Use their communication style: {response_strategy.get('tone_and_style', {})}
-7. Reference relevant memories to show you understand their journey
-8. End with encouragement that acknowledges their specific strengths
-
-Remember: You're not just responding - you're facilitating psychological growth using evidence-based techniques."""
+Now write your reply."""
 
         return prompt
+    
+    def _get_top_memory_snippets(self, conversation_history: List[Dict]) -> str:
+        """Extract top 3 memory snippets with progress indicators"""
+        if not conversation_history:
+            return "• 🆕 New user - first conversation"
+        
+        # Get the most recent and relevant memories
+        snippets = []
+        for memory in conversation_history[-3:]:  # Last 3 memories
+            if isinstance(memory, dict):
+                memory_text = memory.get('memory', '')
+                if memory_text and len(memory_text) > 10:  # Skip very short memories
+                    # Add progress emojis based on content
+                    emoji = self._get_memory_emoji(memory_text, memory.get('metadata', {}))
+                    
+                    # Truncate long memories
+                    snippet = memory_text[:50] + "..." if len(memory_text) > 50 else memory_text
+                    snippets.append(f"• {emoji} {snippet}")
+        
+        return '\n'.join(snippets) if snippets else "• 📝 Limited conversation history"
+    
+    def _get_memory_emoji(self, memory_text: str, metadata: Dict) -> str:
+        """Get appropriate emoji for memory based on content and metadata"""
+        memory_lower = memory_text.lower()
+        
+        # Success/positive indicators
+        if any(word in memory_lower for word in ['completed', 'achieved', 'succeeded', 'won', 'did it']):
+            return "🔥"
+        elif any(word in memory_lower for word in ['streak', 'day', 'consistent']):
+            return "⚡"
+        elif any(word in memory_lower for word in ['breakthrough', 'insight', 'realized']):
+            return "💡"
+        elif any(word in memory_lower for word in ['better', 'improved', 'progress']):
+            return "📈"
+        elif any(word in memory_lower for word in ['struggling', 'difficult', 'hard']):
+            return "💪"
+        elif any(word in memory_lower for word in ['goal', 'plan', 'want to']):
+            return "🎯"
+        else:
+            return "📝"
     
     def _extract_memory_insights(self, conversation_history: List[Dict]) -> str:
         """Extract key insights from conversation memory"""
@@ -332,3 +347,188 @@ RESPONSE APPROACH:
 - Don't try to "fix" everything in one response
 
 Remember: You're providing support, not therapy. Professional help may be needed."""
+    
+    def get_specialized_coach_prompt(self, coach_type: CoachType, user_context: Dict, conversation_history: List[Dict] = None) -> str:
+        """
+        Get specialized coach prompt based on the comprehensive system prompts document
+        """
+        # Extract user preferences and context from subscription data
+        user_preferences = {
+            'pronoun_style': user_context.get('communication_style', 'I'),
+            'plan_type': user_context.get('plan_type', '3_month')
+        }
+        
+        # Extract goals and challenges from subscription fields
+        current_goals = []
+        if user_context.get('personal_goals'):
+            current_goals = [user_context.get('personal_goals')]
+        
+        recent_wins = []  # Will be populated from conversation history
+        current_challenges = []
+        if user_context.get('active_challenges'):
+            current_challenges = [user_context.get('active_challenges')]
+        
+        # Extract wins, challenges, and affirmations from conversation history
+        last_affirmations = []
+        if conversation_history:
+            for memory in conversation_history[-7:]:  # Last 7 interactions
+                memory_text = memory.get('memory', '').lower()
+                
+                # Collect affirmations to avoid repeats
+                if 'affirmation' in memory_text:
+                    last_affirmations.append(memory.get('memory', ''))
+                
+                # Extract recent wins
+                if any(word in memory_text for word in ['completed', 'achieved', 'succeeded', 'accomplished', 'won']):
+                    recent_wins.append(memory.get('memory', '')[:50] + "...")
+                
+                # Extract current challenges from recent conversations
+                if any(word in memory_text for word in ['struggling', 'difficult', 'challenge', 'hard', 'overwhelmed']):
+                    current_challenges.append(memory.get('memory', '')[:50] + "...")
+        
+        # Create coaching context
+        context = CoachingContext(
+            user_id=user_context.get('id', ''),
+            coach_type=coach_type,
+            conversation_history=conversation_history or [],
+            user_preferences=user_preferences,
+            current_goals=current_goals,
+            recent_wins=recent_wins,
+            current_challenges=current_challenges,
+            last_affirmations=last_affirmations
+        )
+        
+        # Get specialized prompt
+        return self.specialized_coaches.get_coach_prompt(context)
+    
+    def detect_coaching_scenario(self, user_message: str, conversation_history: List[Dict], current_hour: int) -> CoachType:
+        """
+        Enhanced coach detection with context awareness and confidence scoring
+        """
+        message_lower = user_message.lower()
+        
+        # Priority 1: Explicit coaching requests (highest confidence)
+        explicit_patterns = {
+            CoachType.WEEKLY_REFLECTION: [
+                'weekly check', 'week review', 'how was my week', 'weekly reflection',
+                'week summary', 'look back at week', 'weekly progress', 'this week'
+            ],
+            CoachType.DAY_PLANNING: [
+                'plan my day', 'what should i do today', 'daily goals', 'today\'s plan',
+                'organize my day', 'schedule today', 'daily priorities', 'plan today',
+                'what\'s my plan', 'day structure', 'daily tasks'
+            ],
+            CoachType.ACCOUNTABILITY: [
+                'how did i do', 'end of day', 'daily review', 'did i complete',
+                'progress check', 'accomplished today', 'finished today',
+                'goals update', 'check in', 'daily recap'
+            ]
+        }
+        
+        for coach_type, patterns in explicit_patterns.items():
+            if any(phrase in message_lower for phrase in patterns):
+                return coach_type
+        
+        # Priority 2: Context-based detection from conversation history
+        recent_context = self._analyze_recent_context(conversation_history)
+        
+        # If user has been discussing goals/planning, lean toward planning coach
+        if recent_context.get('planning_signals', 0) > 2:
+            if any(word in message_lower for word in ['today', 'do', 'should', 'plan', 'want']):
+                return CoachType.DAY_PLANNING
+        
+        # If user has been sharing progress, lean toward accountability
+        if recent_context.get('progress_signals', 0) > 1:
+            if any(word in message_lower for word in ['did', 'done', 'finished', 'completed']):
+                return CoachType.ACCOUNTABILITY
+        
+        # Priority 3: Enhanced time-based detection with context
+        coach_type = self._get_time_based_coach(current_hour, message_lower, recent_context)
+        if coach_type != CoachType.ALWAYS_ON:
+            return coach_type
+        
+        # Priority 4: Default to always-on companion for natural conversations
+        return CoachType.ALWAYS_ON
+    
+    def _analyze_recent_context(self, conversation_history: List[Dict]) -> Dict[str, int]:
+        """Analyze recent conversation for context signals"""
+        context_signals = {
+            'planning_signals': 0,
+            'progress_signals': 0,
+            'gratitude_signals': 0,
+            'motivation_signals': 0,
+            'reflection_signals': 0
+        }
+        
+        # Look at last 5 interactions
+        recent_memories = conversation_history[-5:] if len(conversation_history) >= 5 else conversation_history
+        
+        for memory in recent_memories:
+            memory_text = memory.get('memory', '').lower()
+            
+            # Count planning signals
+            if any(word in memory_text for word in ['goal', 'plan', 'want to', 'will do', 'schedule']):
+                context_signals['planning_signals'] += 1
+            
+            # Count progress signals  
+            if any(word in memory_text for word in ['completed', 'finished', 'done', 'achieved', 'accomplished']):
+                context_signals['progress_signals'] += 1
+                
+            # Count gratitude signals
+            if any(word in memory_text for word in ['grateful', 'thankful', 'appreciate', 'blessed']):
+                context_signals['gratitude_signals'] += 1
+                
+            # Count motivation signals
+            if any(word in memory_text for word in ['motivation', 'inspire', 'encourage', 'boost']):
+                context_signals['motivation_signals'] += 1
+                
+            # Count reflection signals
+            if any(word in memory_text for word in ['reflect', 'think about', 'looking back', 'learned']):
+                context_signals['reflection_signals'] += 1
+        
+        return context_signals
+    
+    def _get_time_based_coach(self, current_hour: int, message_lower: str, context: Dict[str, int]) -> CoachType:
+        """Enhanced time-based coach detection with context"""
+        
+        # Morning (6-10): Only affirmations if explicitly asked for
+        if 6 <= current_hour <= 10:
+            if any(word in message_lower for word in ['plan', 'schedule', 'organize', 'today']):
+                return CoachType.DAY_PLANNING
+            # Only return morning affirmation if they explicitly ask for motivation/affirmation
+            if any(word in message_lower for word in ['affirmation', 'morning boost', 'daily motivation']):
+                return CoachType.MORNING_AFFIRMATION
+        
+        # Late morning (10-12): Planning coach if they seem lost/unorganized
+        elif 10 <= current_hour <= 12:
+            if any(word in message_lower for word in ['lost', 'don\'t know', 'what should', 'confused']):
+                return CoachType.DAY_PLANNING
+        
+        # Only trigger specialized coaches for very specific requests
+        # Most conversations should go to always-on companion for natural flow
+        
+        return CoachType.ALWAYS_ON
+    
+    def _get_sentiment_based_coach(self, message_lower: str) -> CoachType:
+        """Select coach based on message sentiment when no other signals are clear"""
+        
+        # If they're asking for motivation/boost
+        if any(word in message_lower for word in ['motivation', 'inspire', 'boost', 'encourage', 'energy']):
+            current_hour = datetime.now().hour
+            if 6 <= current_hour <= 11:
+                return CoachType.MORNING_AFFIRMATION
+            elif 12 <= current_hour <= 17:
+                return CoachType.MIDDAY_AFFIRMATION
+            else:
+                return CoachType.EVENING_AFFIRMATION
+        
+        # If they're sharing gratitude/appreciation
+        if any(word in message_lower for word in ['grateful', 'thankful', 'appreciate', 'blessed', 'lucky']):
+            return CoachType.GRATITUDE
+        
+        # If they're discussing goals/future
+        if any(word in message_lower for word in ['goal', 'want to', 'planning', 'future', 'dream']):
+            return CoachType.DAY_PLANNING
+        
+        # Default to always-on companion for general conversations
+        return CoachType.ALWAYS_ON
