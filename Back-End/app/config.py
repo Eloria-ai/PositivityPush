@@ -79,9 +79,6 @@ def validate_required_settings():
         "SUPABASE_URL",
         "SUPABASE_SERVICE_KEY", 
         "STRIPE_SECRET_KEY",
-        "STRIPE_WEBHOOK_SECRET",
-        "WA_TOKEN",
-        "WA_PHONE_ID", 
         "OPENAI_API_KEY"
     ]
     
