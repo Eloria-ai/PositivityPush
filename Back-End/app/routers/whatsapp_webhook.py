@@ -52,42 +52,58 @@ async def whatsapp_webhook(
     """
     
     try:
-        # Handle Twilio webhook format (form data)
-        form_data = await request.form()
-        logger.info(f"Received Twilio WhatsApp webhook: {dict(form_data)}")
-        
         # Initialize services
         supabase_service = SupabaseService(db)
         whatsapp_service = WhatsAppService()
         ai_coach = AICoachService()
         
-        # Extract message data from Twilio format
-        message_body = form_data.get("Body", "")
-        from_number = form_data.get("From", "")
-        to_number = form_data.get("To", "")
-        
-        # Clean phone numbers (remove "whatsapp:" prefix)
-        from_number = from_number.replace("whatsapp:", "") if from_number else ""
-        to_number = to_number.replace("whatsapp:", "") if to_number else ""
-        
-        logger.info(f"Message from {from_number}: {message_body}")
-        
-        if message_body and from_number:
-            # Look up subscription once here
-            subscription = await supabase_service.get_subscription_by_wa_id(from_number)
-            logger.info(f"SUBSCRIPTION LOOKUP for '{from_number}': {subscription is not None}")
-            if subscription:
-                logger.info(f"Found subscription ID: {subscription.get('id')}, Status: {subscription.get('status')}")
+        # Try to get JSON data first (WhatsApp Business API)
+        try:
+            json_data = await request.json()
+            logger.info(f"Received WhatsApp Business API webhook: {json_data}")
             
-            await process_twilio_message(
-                message_body,
-                from_number,
-                to_number,
-                subscription,
-                supabase_service,
-                whatsapp_service,
-                ai_coach
-            )
+            # Handle WhatsApp Business API format
+            if json_data.get("object") == "whatsapp_business_account":
+                await process_whatsapp_business_message(
+                    json_data,
+                    supabase_service,
+                    whatsapp_service,
+                    ai_coach
+                )
+                return JSONResponse(content={"status": "success"})
+        
+        except Exception:
+            # Fall back to Twilio format (form data)
+            form_data = await request.form()
+            logger.info(f"Received Twilio WhatsApp webhook: {dict(form_data)}")
+            
+            # Extract message data from Twilio format
+            message_body = form_data.get("Body", "")
+            from_number = form_data.get("From", "")
+            to_number = form_data.get("To", "")
+            
+            # Clean phone numbers (remove "whatsapp:" prefix)
+            from_number = from_number.replace("whatsapp:", "") if from_number else ""
+            to_number = to_number.replace("whatsapp:", "") if to_number else ""
+            
+            logger.info(f"Message from {from_number}: {message_body}")
+            
+            if message_body and from_number:
+                # Look up subscription once here
+                subscription = await supabase_service.get_subscription_by_wa_id(from_number)
+                logger.info(f"SUBSCRIPTION LOOKUP for '{from_number}': {subscription is not None}")
+                if subscription:
+                    logger.info(f"Found subscription ID: {subscription.get('id')}, Status: {subscription.get('status')}")
+                
+                await process_twilio_message(
+                    message_body,
+                    from_number,
+                    to_number,
+                    subscription,
+                    supabase_service,
+                    whatsapp_service,
+                    ai_coach
+                )
         
         return JSONResponse(content={"status": "success"})
         
@@ -98,13 +114,56 @@ async def whatsapp_webhook(
             detail="Webhook processing failed"
         )
 
+async def process_whatsapp_business_message(
+    webhook_data: Dict[str, Any],
+    supabase_service: SupabaseService,
+    whatsapp_service: WhatsAppService,
+    ai_coach: AICoachService
+):
+    """Process WhatsApp Business API webhook data"""
+    
+    entries = webhook_data.get("entry", [])
+    
+    for entry in entries:
+        changes = entry.get("changes", [])
+        
+        for change in changes:
+            value = change.get("value", {})
+            messages = value.get("messages", [])
+            
+            for message in messages:
+                # Skip status messages
+                if message.get("type") == "status":
+                    continue
+                    
+                wa_id = message["from"]
+                message_text = message.get("text", {}).get("body", "")
+                message_id = message["id"]
+                
+                logger.info(f"Processing WhatsApp Business message from {wa_id}: {message_text}")
+                
+                # Look up subscription
+                subscription = await supabase_service.get_subscription_by_wa_id(wa_id)
+                logger.info(f"SUBSCRIPTION LOOKUP for '{wa_id}': {subscription is not None}")
+                
+                # Check if this is an activation message
+                if message_text.startswith("POSITIVITY-PUSH START"):
+                    await handle_activation_message(
+                        wa_id, message_text, supabase_service, whatsapp_service, ai_coach
+                    )
+                else:
+                    # Handle regular coaching conversation
+                    await handle_coaching_message_with_subscription(
+                        wa_id, message_text, message_id, subscription, supabase_service, whatsapp_service, ai_coach
+                    )
+
 async def process_message(
     message_data: Dict[str, Any],
     supabase_service: SupabaseService,
     whatsapp_service: WhatsAppService,
     ai_coach: AICoachService
 ):
-    """Process individual WhatsApp message"""
+    """Process individual WhatsApp message (legacy)"""
     
     messages = message_data.get("messages", [])
     
