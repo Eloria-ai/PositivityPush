@@ -94,6 +94,8 @@ async def whatsapp_webhook(
                 logger.info(f"SUBSCRIPTION LOOKUP for '{from_number}': {subscription is not None}")
                 if subscription:
                     logger.info(f"Found subscription ID: {subscription.get('id')}, Status: {subscription.get('status')}")
+                else:
+                    logger.info(f"No subscription found for {from_number} - will send test response")
                 
                 await process_twilio_message(
                     message_body,
