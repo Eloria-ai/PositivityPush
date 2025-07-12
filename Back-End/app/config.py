@@ -86,8 +86,8 @@ def validate_required_settings():
         "SUPABASE_SERVICE_KEY", 
         "STRIPE_SECRET_KEY",
         "OPENAI_API_KEY",
-        "WA_TOKEN",
-        "WA_PHONE_ID"
+        "TWILIO_ACCOUNT_SID",
+        "TWILIO_AUTH_TOKEN"
     ]
     
     missing = []
