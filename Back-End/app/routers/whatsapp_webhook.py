@@ -117,7 +117,7 @@ async def whatsapp_webhook(
 async def process_whatsapp_business_message(
     webhook_data: Dict[str, Any],
     supabase_service: SupabaseService,
-    whatsapp_service: WhatsAppService,
+    whatsapp_service: MetaWhatsAppService,
     ai_coach: AICoachService
 ):
     """Process WhatsApp Business API webhook data"""
@@ -160,7 +160,7 @@ async def process_whatsapp_business_message(
 async def process_message(
     message_data: Dict[str, Any],
     supabase_service: SupabaseService,
-    whatsapp_service: WhatsAppService,
+    whatsapp_service: MetaWhatsAppService,
     ai_coach: AICoachService
 ):
     """Process individual WhatsApp message (legacy)"""
@@ -195,7 +195,7 @@ async def process_twilio_message(
     to_number: str,
     subscription: dict,
     supabase_service: SupabaseService,
-    whatsapp_service: WhatsAppService,
+    whatsapp_service: MetaWhatsAppService,
     ai_coach: AICoachService
 ):
     """Process message from Twilio WhatsApp webhook"""
@@ -217,7 +217,7 @@ async def handle_activation_message(
     wa_id: str,
     message_text: str,
     supabase_service: SupabaseService,
-    whatsapp_service: WhatsAppService,
+    whatsapp_service: MetaWhatsAppService,
     ai_coach: AICoachService
 ):
     """
@@ -284,7 +284,7 @@ async def handle_coaching_message_with_subscription(
     message_id: str,
     subscription: dict,
     supabase_service: SupabaseService,
-    whatsapp_service: WhatsAppService,
+    whatsapp_service: MetaWhatsAppService,
     ai_coach: AICoachService
 ):
     """
@@ -341,7 +341,7 @@ async def handle_coaching_message(
     message_text: str,
     message_id: str,
     supabase_service: SupabaseService,
-    whatsapp_service: WhatsAppService,
+    whatsapp_service: MetaWhatsAppService,
     ai_coach: AICoachService
 ):
     """
