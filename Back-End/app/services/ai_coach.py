@@ -14,6 +14,7 @@ from app.services.mem0_client import Mem0Service
 from app.services.psychological_framework import PsychologicalFramework, PsychologicalProfile
 from app.services.enhanced_prompts import EnhancedPromptEngine
 from app.services.specialized_coaches import CoachType
+from app.services.core_personality import core_personality, ConversationContext
 
 logger = logging.getLogger(__name__)
 
@@ -30,28 +31,24 @@ class AICoachService:
     async def generate_welcome_message(self, subscription: Dict[str, Any]) -> str:
         """Generate personalized welcome message for new users"""
         try:
-            system_prompt = """You are a warm, enthusiastic AI life coach for Positivity Push. 
-            A new user just activated their subscription. Create a welcoming message that:
-            - Welcomes them warmly to Positivity Push
-            - Explains you're their personal AI coach
-            - Asks about their goals and what they'd like to work on
-            - Sets a positive, encouraging tone
-            - Keep it conversational and under 100 words
-            """
+            # Use consolidated personality system for consistency
+            system_prompt = core_personality.get_context_aware_personality(
+                context=ConversationContext.ACTIVATION,
+                user_profile={
+                    'plan_type': subscription.get('plan_type', '3_month'),
+                    'email': subscription.get('email', 'Not provided')
+                }
+            )
             
-            user_context = f"""
-            User just completed payment for {subscription.get('plan_type', '3_month')} plan.
-            Email: {subscription.get('email', 'Not provided')}
-            """
-            
+            # Generate activation message
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Generate welcome message for: {user_context}"}
+                    {"role": "user", "content": "Generate a warm welcome message for this new user who just activated their coaching subscription."}
                 ],
-                max_tokens=200,
-                temperature=0.7
+                max_tokens=150,
+                temperature=0.8
             )
             
             welcome_msg = response.choices[0].message.content.strip()
@@ -71,9 +68,9 @@ class AICoachService:
             
         except Exception as e:
             logger.error(f"Error generating welcome message: {e}")
-            return """🎉 Welcome to Positivity Push! I'm your personal AI coach, here to support you on your journey to greater positivity and personal growth. 
-
-I'm excited to get to know you! What are some goals you'd like to work on together? Whether it's building confidence, managing stress, or creating positive habits - I'm here to help! ✨"""
+            # Use context-aware fallback from personality system
+            fallback_responses = core_personality.get_fallback_responses(ConversationContext.ACTIVATION)
+            return fallback_responses[0]  # Use first fallback response
     
     async def generate_response(
         self, 
@@ -116,13 +113,17 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
                     conversation_history=user_memories
                 )
             else:
-                # Use enhanced psychological prompt for general conversations
-                enhanced_prompt = self.prompt_engine.generate_enhanced_prompt(
-                    user_message=message,
-                    psychological_analysis=psychological_analysis,
-                    response_strategy=response_strategy,
-                    user_context=user_context,
-                    conversation_history=user_memories
+                # Use consolidated personality system for general conversations
+                user_profile_data = {
+                    'goals': user_context.get('goals', ''),
+                    'recent_challenges': psychological_analysis.get('emotional_state', ''),
+                    'communication_style': user_context.get('communication_style', ''),
+                    'progress_notes': user_memories[:100] if user_memories else ''
+                }
+                
+                enhanced_prompt = core_personality.get_context_aware_personality(
+                    context=ConversationContext.GENERAL_CONVERSATION,
+                    user_profile=user_profile_data
                 )
             
             # Debug: Log the prompt being sent to OpenAI
@@ -181,28 +182,30 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
         user_id: str, 
         user_context: Dict[str, Any]
     ) -> str:
-        """Generate personalized daily affirmation"""
+        """Generate personalized daily affirmation using personality system"""
         try:
             user_memories = await self.mem0_service.get_memories(user_id)
             
-            system_prompt = f"""You are a personalized AI life coach. Create a daily affirmation that:
-            - Is specific to this user's goals and challenges
-            - Uses their name if available: {user_context.get('email', '').split('@')[0] if user_context.get('email') else 'friend'}
-            - Is empowering and actionable
-            - References their recent conversations or progress
-            - Keep it under 50 words
-            - Start with a warm greeting like "Good morning" or "Today"
+            # Build user profile for personalization
+            user_profile_data = {
+                'goals': user_context.get('goals', ''),
+                'recent_challenges': user_context.get('challenges', ''),
+                'communication_style': user_context.get('communication_style', ''),
+                'progress_notes': user_memories[:200] if user_memories else 'New user'
+            }
             
-            User memories: {user_memories[:500] if user_memories else 'New user, no previous context'}
-            """
+            system_prompt = core_personality.get_context_aware_personality(
+                context=ConversationContext.DAILY_AFFIRMATION,
+                user_profile=user_profile_data
+            )
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "Generate today's personalized affirmation"}
+                    {"role": "user", "content": "Generate today's personalized morning affirmation for this user"}
                 ],
-                max_tokens=100,
+                max_tokens=120,
                 temperature=0.9
             )
             
@@ -223,7 +226,9 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
             
         except Exception as e:
             logger.error(f"Error generating daily affirmation: {e}")
-            return "Today is a new opportunity to grow, learn, and spread positivity. You've got this! ✨"
+            # Use personality system fallback
+            fallbacks = core_personality.get_fallback_responses(ConversationContext.DAILY_AFFIRMATION)
+            return fallbacks[0]
     
     async def generate_gratitude_prompt(
         self, 
@@ -387,25 +392,18 @@ I'm excited to get to know you! What are some goals you'd like to work on togeth
             return []  # Return empty list to continue processing
     
     def _get_fallback_response(self, message: str) -> str:
-        """Generate contextual fallback response based on message sentiment"""
+        """Generate contextual fallback response using personality system"""
         message_lower = message.lower()
         
-        # Detect message sentiment and provide appropriate fallback
-        if any(word in message_lower for word in ['sad', 'depressed', 'down', 'low', 'terrible']):
-            return "I hear that you're going through a tough time. Your feelings are completely valid. I'm here to support you through this. What's one small thing that might bring you a bit of comfort right now? 💙"
+        # Detect context and use appropriate fallback
+        if any(word in message_lower for word in ['sad', 'depressed', 'down', 'low', 'terrible', 'crisis', 'help']):
+            # Crisis or emotional support context
+            fallbacks = core_personality.get_fallback_responses(ConversationContext.CRISIS_SUPPORT)
+            return fallbacks[0]
         
-        elif any(word in message_lower for word in ['anxious', 'worried', 'stressed', 'overwhelmed']):
-            return "That sounds really stressful. Take a deep breath with me - you don't have to carry this alone. What's one thing you can control in this situation right now? 🌱"
-        
-        elif any(word in message_lower for word in ['motivation', 'goal', 'want to', 'trying']):
-            return "I can hear your desire to grow and move forward - that's already a strength! What's one tiny step you could take today toward what you want? Even the smallest action counts. ✨"
-        
-        elif any(word in message_lower for word in ['tired', 'exhausted', 'burned out']):
-            return "It sounds like you've been pushing yourself hard. Rest isn't giving up - it's recharging. What's one gentle thing you could do for yourself right now? 🌙"
-        
-        else:
-            # General supportive fallback
-            return "I'm here with you. Sometimes things feel complicated, but you don't have to figure it all out at once. What's on your heart right now? 💙"
+        # Default to general conversation fallbacks
+        fallbacks = core_personality.get_fallback_responses(ConversationContext.GENERAL_CONVERSATION)
+        return fallbacks[0]
     
     async def _enhance_memory_storage(self, conversation_messages: List[Dict], user_id: str, metadata: Dict) -> None:
         """Enhanced memory storage with better error handling"""
