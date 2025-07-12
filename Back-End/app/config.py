@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     TWILIO_WHATSAPP_NUMBER: str = os.getenv("TWILIO_WHATSAPP_NUMBER", "+14155238886")
     WA_WEBHOOK_VERIFY_TOKEN: str = os.getenv("WA_WEBHOOK_VERIFY_TOKEN", "")
     
+    # Meta WhatsApp Business API Settings  
+    WA_TOKEN: str = os.getenv("WA_TOKEN", "")
+    WA_PHONE_ID: str = os.getenv("WA_PHONE_ID", "")
+    WA_BUSINESS_ACCOUNT_ID: str = os.getenv("WA_BUSINESS_ACCOUNT_ID", "")
+    WA_BUSINESS_NUMBER: str = os.getenv("WA_BUSINESS_NUMBER", "")
+    
     # OpenAI Settings
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = "gpt-4o-mini"
@@ -79,7 +85,9 @@ def validate_required_settings():
         "SUPABASE_URL",
         "SUPABASE_SERVICE_KEY", 
         "STRIPE_SECRET_KEY",
-        "OPENAI_API_KEY"
+        "OPENAI_API_KEY",
+        "WA_TOKEN",
+        "WA_PHONE_ID"
     ]
     
     missing = []

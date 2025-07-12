@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 
 from app.config import settings
 from app.deps import get_supabase_client
-from app.services.whatsapp_service import WhatsAppService
+from app.services.meta_whatsapp_service import MetaWhatsAppService
 from app.services.ai_coach import AICoachService
 from app.services.supabase_client import SupabaseService
 
@@ -54,7 +54,7 @@ async def whatsapp_webhook(
     try:
         # Initialize services
         supabase_service = SupabaseService(db)
-        whatsapp_service = WhatsAppService()
+        whatsapp_service = MetaWhatsAppService()
         ai_coach = AICoachService()
         
         # Try to get JSON data first (WhatsApp Business API)
