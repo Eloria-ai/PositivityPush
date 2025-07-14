@@ -182,12 +182,6 @@ def run_diagnostics():
 # Run diagnostics when imported
 try:
     run_diagnostics()
-    
-    # Test manual task trigger once (only on worker startup)
-    import os
-    if os.getenv("CELERY_WORKER_TEST", "false").lower() == "true":
-        test_manual_task_trigger()
-        
 except Exception as e:
     print(f"Diagnostic failed: {e}")
 
@@ -249,6 +243,14 @@ def test_manual_task_trigger():
         print(f"❌ Manual trigger failed: {e}")
     
     print("=" * 40)
+
+# Test manual task trigger on worker startup (if enabled)
+import os
+if os.getenv("CELERY_WORKER_TEST", "false").lower() == "true":
+    try:
+        test_manual_task_trigger()
+    except Exception as e:
+        print(f"Worker test failed: {e}")
 
 if __name__ == '__main__':
     # Run configuration test
