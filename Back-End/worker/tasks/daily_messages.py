@@ -102,6 +102,8 @@ def send_morning_affirmations(self, timezone='UTC'):
 async def _send_morning_affirmations_async(timezone):
     """Async implementation of morning affirmations"""
     
+    logger.info(f"🌅 Starting morning affirmations for timezone: {timezone}")
+    
     # Initialize services
     db = get_supabase_client()
     supabase_service = SupabaseService(db)
@@ -110,14 +112,18 @@ async def _send_morning_affirmations_async(timezone):
     
     # Get active subscribers for this timezone
     subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
+    logger.info(f"📊 Found {len(subscribers)} active subscribers for timezone {timezone}")
     
     sent_count = 0
     error_count = 0
     
     for subscriber in subscribers:
         try:
+            logger.info(f"👤 Processing subscriber: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
+            
             # Skip if user has already received affirmation today
             if await _already_received_message_today(subscriber['id'], 'daily_affirmation', supabase_service):
+                logger.info(f"⏭️ Skipping {subscriber['email']} - already received message today")
                 continue
             
             # Generate personalized affirmation
@@ -141,10 +147,10 @@ async def _send_morning_affirmations_async(timezone):
                         message_type='assistant'
                     )
                     sent_count += 1
-                    logger.info(f"Affirmation sent to user {subscriber['id']}")
+                    logger.info(f"✅ Affirmation sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
                 else:
                     error_count += 1
-                    logger.error(f"Failed to send affirmation to user {subscriber['id']}")
+                    logger.error(f"❌ Failed to send affirmation to {subscriber['email']} (WA: {subscriber['wa_id']})")
             
         except Exception as e:
             error_count += 1
