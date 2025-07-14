@@ -244,13 +244,12 @@ def test_manual_task_trigger():
     
     print("=" * 40)
 
-# Test manual task trigger on worker startup (if enabled)
-import os
-if os.getenv("CELERY_WORKER_TEST", "false").lower() == "true":
-    try:
-        test_manual_task_trigger()
-    except Exception as e:
-        print(f"Worker test failed: {e}")
+# Test manual task trigger on worker startup (ALWAYS RUN FOR DEBUGGING)
+try:
+    print("🚀 RUNNING WORKER STARTUP TEST...")
+    test_manual_task_trigger()
+except Exception as e:
+    print(f"Worker test failed: {e}")
 
 if __name__ == '__main__':
     # Run configuration test
