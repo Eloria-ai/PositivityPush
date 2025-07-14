@@ -47,7 +47,7 @@ async def _send_daily_accountability_async(timezone):
     whatsapp_service = WhatsAppService()
     
     # Get active subscribers for accountability check-ins
-    active_users = supabase_service.get_active_subscribers_for_timezone(timezone)
+    active_users = await supabase_service.get_subscribers_for_daily_message(timezone)
     
     successful_sends = 0
     failed_sends = 0

@@ -84,6 +84,28 @@ celery_app.conf.beat_schedule = {
         'kwargs': {'timezone': 'Europe/Paris'}
     },
     
+    # Daily accountability check-ins (2 PM in various timezones)
+    'send-daily-accountability-utc': {
+        'task': 'worker.tasks.daily_messages.send_daily_accountability_checkin',
+        'schedule': crontab(hour=14, minute=0),
+        'kwargs': {'timezone': 'UTC'}
+    },
+    'send-daily-accountability-est': {
+        'task': 'worker.tasks.daily_messages.send_daily_accountability_checkin',
+        'schedule': crontab(hour=19, minute=0),  # 2 PM EST = 19:00 UTC
+        'kwargs': {'timezone': 'America/New_York'}
+    },
+    'send-daily-accountability-pst': {
+        'task': 'worker.tasks.daily_messages.send_daily_accountability_checkin',
+        'schedule': crontab(hour=22, minute=0),  # 2 PM PST = 22:00 UTC
+        'kwargs': {'timezone': 'America/Los_Angeles'}
+    },
+    'send-daily-accountability-cet': {
+        'task': 'worker.tasks.daily_messages.send_daily_accountability_checkin',
+        'schedule': crontab(hour=13, minute=0),  # 2 PM CET = 13:00 UTC
+        'kwargs': {'timezone': 'Europe/Paris'}
+    },
+    
     # Weekly progress reports (Sunday 6 PM)
     'send-weekly-progress-reports': {
         'task': 'worker.tasks.weekly_reports.send_weekly_progress_reports',
