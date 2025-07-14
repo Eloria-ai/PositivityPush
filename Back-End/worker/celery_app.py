@@ -23,6 +23,13 @@ celery_app = Celery(
     ]
 )
 
+# Force task discovery and registration
+try:
+    from worker.tasks import daily_messages, weekly_reports, email_notifications
+    print(f"📦 Successfully imported task modules")
+except ImportError as e:
+    print(f"❌ Task import error: {e}")
+
 # Celery configuration
 celery_app.conf.update(
     task_serializer='json',
