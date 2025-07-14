@@ -135,5 +135,43 @@ celery_app.conf.task_routes = {
 # Default queue
 celery_app.conf.task_default_queue = 'default'
 
+def test_celery_config():
+    """Test Celery configuration for debugging"""
+    print("=== CELERY CONFIGURATION TEST ===")
+    
+    # Check task registration
+    all_tasks = list(celery_app.tasks.keys())
+    print(f"Total registered tasks: {len(all_tasks)}")
+
+    daily_tasks = [name for name in all_tasks if 'daily_messages' in name]
+    print(f"\nDaily message tasks found: {len(daily_tasks)}")
+    for task in daily_tasks:
+        print(f"  ✅ {task}")
+
+    # Check beat schedule
+    schedule = celery_app.conf.beat_schedule
+    print(f"\nBeat schedule entries: {len(schedule)}")
+
+    for name, config in schedule.items():
+        if 'daily' in name or 'morning' in name or 'accountability' in name or 'evening' in name:
+            print(f"  📅 {name}: {config['task']}")
+    
+    # Check specific tasks
+    target_tasks = [
+        'worker.tasks.daily_messages.send_morning_affirmations',
+        'worker.tasks.daily_messages.send_daily_accountability_checkin',
+        'worker.tasks.daily_messages.send_evening_gratitude'
+    ]
+
+    print(f"\nSpecific task registration:")
+    for task_name in target_tasks:
+        if task_name in all_tasks:
+            print(f"✅ {task_name} - REGISTERED")
+        else:
+            print(f"❌ {task_name} - NOT REGISTERED")
+
 if __name__ == '__main__':
+    # Run configuration test
+    test_celery_config()
+    # Then start celery
     celery_app.start()
