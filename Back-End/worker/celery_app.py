@@ -132,15 +132,10 @@ celery_app.conf.beat_schedule = {
     },
 }
 
-# Task routing
-celery_app.conf.task_routes = {
-    'worker.tasks.daily_messages.*': {'queue': 'daily_messages'},
-    'worker.tasks.weekly_reports.*': {'queue': 'weekly_reports'},
-    'worker.tasks.email_notifications.*': {'queue': 'email_notifications'},
-}
-
-# Default queue
-celery_app.conf.task_default_queue = 'default'
+# Simplified queue configuration - use default queue for all tasks
+# This ensures Beat and Workers use the same queue
+celery_app.conf.task_routes = {}  # Remove custom routing
+celery_app.conf.task_default_queue = 'celery'  # Use standard celery queue
 
 # Run configuration test on import (for Railway deployment)
 def run_diagnostics():
@@ -250,6 +245,12 @@ try:
     test_manual_task_trigger()
 except Exception as e:
     print(f"Worker test failed: {e}")
+
+# Debug queue configuration
+print("📋 CELERY QUEUE CONFIGURATION:")
+print(f"Task routes: {celery_app.conf.task_routes}")
+print(f"Default queue: {celery_app.conf.task_default_queue}")
+print("🔧 Using simplified queue setup - all tasks go to 'celery' queue")
 
 if __name__ == '__main__':
     # Run configuration test
