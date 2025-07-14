@@ -220,6 +220,30 @@ def test_celery_config():
         else:
             print(f"❌ {task_name} - NOT REGISTERED")
 
+def test_manual_task_trigger():
+    """Test manual task triggering to verify worker communication"""
+    print("\n🧪 MANUAL TASK TRIGGER TEST")
+    print("=" * 40)
+    
+    try:
+        from worker.tasks.daily_messages import send_morning_affirmations
+        print("✅ Task import successful")
+        
+        # Trigger task manually
+        print("📤 Triggering morning affirmations task...")
+        result = send_morning_affirmations.delay('UTC')
+        print(f"✅ Task triggered! ID: {result.id}")
+        
+        # Try to get result
+        print("⏳ Waiting for task completion (30s timeout)...")
+        task_result = result.get(timeout=30)
+        print(f"🎉 Task completed! Result: {task_result}")
+        
+    except Exception as e:
+        print(f"❌ Manual trigger failed: {e}")
+    
+    print("=" * 40)
+
 if __name__ == '__main__':
     # Run configuration test
     test_celery_config()
