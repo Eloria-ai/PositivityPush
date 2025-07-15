@@ -227,6 +227,294 @@ async def _send_evening_gratitude_async(timezone):
     return {"sent": sent_count, "errors": error_count, "timezone": timezone}
 
 @shared_task(bind=True, max_retries=3)
+def send_weekly_reflection(self, timezone='UTC'):
+    """
+    Send weekly reflection and planning messages to users
+    Review the week's progress and plan for next week
+    """
+    logger.info(f"🗓️ Starting weekly reflection for timezone: {timezone}")
+    
+    try:
+        return asyncio.run(_send_weekly_reflection_async(timezone))
+    except Exception as e:
+        logger.error(f"Error in weekly reflection task: {e}")
+        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+async def _send_weekly_reflection_async(timezone):
+    """Async implementation of weekly reflection"""
+    
+    # Initialize services
+    db = get_supabase_client()
+    supabase_service = SupabaseService(db)
+    ai_coach = AICoachService()
+    whatsapp_service = WhatsAppService()
+    
+    # Get active subscribers for this timezone
+    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
+    logger.info(f"📊 Found {len(subscribers)} active subscribers for weekly reflection - timezone {timezone}")
+    
+    sent_count = 0
+    error_count = 0
+    
+    for subscriber in subscribers:
+        try:
+            logger.info(f"👤 Processing weekly reflection for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
+            
+            # Skip if user has already received weekly reflection this week
+            if await _already_received_message_this_week(subscriber['id'], 'weekly_reflection', supabase_service):
+                logger.info(f"⏭️ Skipping {subscriber['email']} - already received weekly reflection this week")
+                continue
+            
+            # Generate personalized weekly reflection
+            reflection = await ai_coach.generate_weekly_reflection(
+                user_id=subscriber['id'],
+                user_context=subscriber
+            )
+            
+            # Send via WhatsApp
+            if subscriber.get('wa_id'):
+                success = await whatsapp_service.send_message(
+                    to=subscriber['wa_id'],
+                    message=reflection
+                )
+                
+                if success:
+                    # Log the sent message
+                    await supabase_service.log_conversation(
+                        subscriber_id=subscriber['id'],
+                        content=reflection,
+                        message_type='assistant'
+                    )
+                    sent_count += 1
+                    logger.info(f"✅ Weekly reflection sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
+                else:
+                    error_count += 1
+                    logger.error(f"❌ Failed to send weekly reflection to {subscriber['email']} (WA: {subscriber['wa_id']})")
+            
+        except Exception as e:
+            error_count += 1
+            logger.error(f"Error processing weekly reflection for user {subscriber.get('id', 'unknown')}: {e}")
+    
+    logger.info(f"🗓️ Weekly reflection complete. Sent: {sent_count}, Errors: {error_count}")
+    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+
+@shared_task(bind=True, max_retries=3)
+def send_day_planning(self, timezone='UTC'):
+    """
+    Send day planning messages to users
+    Help them structure their day and set intentions
+    """
+    logger.info(f"📝 Starting day planning for timezone: {timezone}")
+    
+    try:
+        return asyncio.run(_send_day_planning_async(timezone))
+    except Exception as e:
+        logger.error(f"Error in day planning task: {e}")
+        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+async def _send_day_planning_async(timezone):
+    """Async implementation of day planning"""
+    
+    # Initialize services
+    db = get_supabase_client()
+    supabase_service = SupabaseService(db)
+    ai_coach = AICoachService()
+    whatsapp_service = WhatsAppService()
+    
+    # Get active subscribers for this timezone
+    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
+    logger.info(f"📊 Found {len(subscribers)} active subscribers for day planning - timezone {timezone}")
+    
+    sent_count = 0
+    error_count = 0
+    
+    for subscriber in subscribers:
+        try:
+            logger.info(f"👤 Processing day planning for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
+            
+            # Skip if user has already received day planning today
+            if await _already_received_message_today(subscriber['id'], 'day_planning', supabase_service):
+                logger.info(f"⏭️ Skipping {subscriber['email']} - already received day planning today")
+                continue
+            
+            # Generate personalized day planning
+            planning = await ai_coach.generate_day_planning(
+                user_id=subscriber['id'],
+                user_context=subscriber
+            )
+            
+            # Send via WhatsApp
+            if subscriber.get('wa_id'):
+                success = await whatsapp_service.send_message(
+                    to=subscriber['wa_id'],
+                    message=planning
+                )
+                
+                if success:
+                    # Log the sent message
+                    await supabase_service.log_conversation(
+                        subscriber_id=subscriber['id'],
+                        content=planning,
+                        message_type='assistant'
+                    )
+                    sent_count += 1
+                    logger.info(f"✅ Day planning sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
+                else:
+                    error_count += 1
+                    logger.error(f"❌ Failed to send day planning to {subscriber['email']} (WA: {subscriber['wa_id']})")
+            
+        except Exception as e:
+            error_count += 1
+            logger.error(f"Error processing day planning for user {subscriber.get('id', 'unknown')}: {e}")
+    
+    logger.info(f"📝 Day planning complete. Sent: {sent_count}, Errors: {error_count}")
+    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+
+@shared_task(bind=True, max_retries=3)
+def send_midday_affirmation(self, timezone='UTC'):
+    """
+    Send mid-day affirmation messages to users
+    Boost energy and motivation during the day
+    """
+    logger.info(f"☀️ Starting mid-day affirmation for timezone: {timezone}")
+    
+    try:
+        return asyncio.run(_send_midday_affirmation_async(timezone))
+    except Exception as e:
+        logger.error(f"Error in mid-day affirmation task: {e}")
+        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+async def _send_midday_affirmation_async(timezone):
+    """Async implementation of mid-day affirmation"""
+    
+    # Initialize services
+    db = get_supabase_client()
+    supabase_service = SupabaseService(db)
+    ai_coach = AICoachService()
+    whatsapp_service = WhatsAppService()
+    
+    # Get active subscribers for this timezone
+    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
+    logger.info(f"📊 Found {len(subscribers)} active subscribers for mid-day affirmation - timezone {timezone}")
+    
+    sent_count = 0
+    error_count = 0
+    
+    for subscriber in subscribers:
+        try:
+            logger.info(f"👤 Processing mid-day affirmation for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
+            
+            # Skip if user has already received mid-day affirmation today
+            if await _already_received_message_today(subscriber['id'], 'midday_affirmation', supabase_service):
+                logger.info(f"⏭️ Skipping {subscriber['email']} - already received mid-day affirmation today")
+                continue
+            
+            # Generate personalized mid-day affirmation
+            affirmation = await ai_coach.generate_midday_affirmation(
+                user_id=subscriber['id'],
+                user_context=subscriber
+            )
+            
+            # Send via WhatsApp
+            if subscriber.get('wa_id'):
+                success = await whatsapp_service.send_message(
+                    to=subscriber['wa_id'],
+                    message=affirmation
+                )
+                
+                if success:
+                    # Log the sent message
+                    await supabase_service.log_conversation(
+                        subscriber_id=subscriber['id'],
+                        content=affirmation,
+                        message_type='assistant'
+                    )
+                    sent_count += 1
+                    logger.info(f"✅ Mid-day affirmation sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
+                else:
+                    error_count += 1
+                    logger.error(f"❌ Failed to send mid-day affirmation to {subscriber['email']} (WA: {subscriber['wa_id']})")
+            
+        except Exception as e:
+            error_count += 1
+            logger.error(f"Error processing mid-day affirmation for user {subscriber.get('id', 'unknown')}: {e}")
+    
+    logger.info(f"☀️ Mid-day affirmation complete. Sent: {sent_count}, Errors: {error_count}")
+    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+
+@shared_task(bind=True, max_retries=3)
+def send_evening_affirmation(self, timezone='UTC'):
+    """
+    Send evening affirmation messages to users
+    End the day with positive reinforcement
+    """
+    logger.info(f"🌙 Starting evening affirmation for timezone: {timezone}")
+    
+    try:
+        return asyncio.run(_send_evening_affirmation_async(timezone))
+    except Exception as e:
+        logger.error(f"Error in evening affirmation task: {e}")
+        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+async def _send_evening_affirmation_async(timezone):
+    """Async implementation of evening affirmation"""
+    
+    # Initialize services
+    db = get_supabase_client()
+    supabase_service = SupabaseService(db)
+    ai_coach = AICoachService()
+    whatsapp_service = WhatsAppService()
+    
+    # Get active subscribers for this timezone
+    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
+    logger.info(f"📊 Found {len(subscribers)} active subscribers for evening affirmation - timezone {timezone}")
+    
+    sent_count = 0
+    error_count = 0
+    
+    for subscriber in subscribers:
+        try:
+            logger.info(f"👤 Processing evening affirmation for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
+            
+            # Skip if user has already received evening affirmation today
+            if await _already_received_message_today(subscriber['id'], 'evening_affirmation', supabase_service):
+                logger.info(f"⏭️ Skipping {subscriber['email']} - already received evening affirmation today")
+                continue
+            
+            # Generate personalized evening affirmation
+            affirmation = await ai_coach.generate_evening_affirmation(
+                user_id=subscriber['id'],
+                user_context=subscriber
+            )
+            
+            # Send via WhatsApp
+            if subscriber.get('wa_id'):
+                success = await whatsapp_service.send_message(
+                    to=subscriber['wa_id'],
+                    message=affirmation
+                )
+                
+                if success:
+                    # Log the sent message
+                    await supabase_service.log_conversation(
+                        subscriber_id=subscriber['id'],
+                        content=affirmation,
+                        message_type='assistant'
+                    )
+                    sent_count += 1
+                    logger.info(f"✅ Evening affirmation sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
+                else:
+                    error_count += 1
+                    logger.error(f"❌ Failed to send evening affirmation to {subscriber['email']} (WA: {subscriber['wa_id']})")
+            
+        except Exception as e:
+            error_count += 1
+            logger.error(f"Error processing evening affirmation for user {subscriber.get('id', 'unknown')}: {e}")
+    
+    logger.info(f"🌙 Evening affirmation complete. Sent: {sent_count}, Errors: {error_count}")
+    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+
+@shared_task(bind=True, max_retries=3)
 def send_weekly_check_ins(self, timezone='UTC'):
     """
     Send weekly check-in messages to users
@@ -377,6 +665,10 @@ def _get_message_keywords(message_type: str) -> list:
     keywords = {
         'daily_affirmation': ['today', 'this morning', 'affirmation', 'you are', 'you can'],
         'gratitude_prompt': ['grateful', 'gratitude', 'appreciate', 'thankful', 'reflect'],
-        'weekly_check_in': ['week', 'how has', 'how are you', 'check in', 'proud of']
+        'weekly_check_in': ['week', 'how has', 'how are you', 'check in', 'proud of'],
+        'weekly_reflection': ['week', 'reflection', 'progress', 'goals', 'looking back'],
+        'day_planning': ['plan', 'today', 'intentions', 'priorities', 'schedule'],
+        'midday_affirmation': ['midday', 'afternoon', 'energy', 'motivation', 'keep going'],
+        'evening_affirmation': ['evening', 'tonight', 'accomplished', 'proud', 'tomorrow']
     }
     return keywords.get(message_type, [])
