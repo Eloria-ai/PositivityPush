@@ -91,6 +91,72 @@ celery_app.conf.beat_schedule = {
         'kwargs': {'timezone': 'Europe/Paris'}
     },
     
+    # Day planning (9 AM in various timezones)
+    'send-day-planning-utc': {
+        'task': 'worker.tasks.daily_messages.send_day_planning',
+        'schedule': crontab(hour=9, minute=0),
+        'kwargs': {'timezone': 'UTC'}
+    },
+    'send-day-planning-est': {
+        'task': 'worker.tasks.daily_messages.send_day_planning',
+        'schedule': crontab(hour=14, minute=0),  # 9 AM EST = 14:00 UTC
+        'kwargs': {'timezone': 'America/New_York'}
+    },
+    'send-day-planning-pst': {
+        'task': 'worker.tasks.daily_messages.send_day_planning',
+        'schedule': crontab(hour=17, minute=0),  # 9 AM PST = 17:00 UTC
+        'kwargs': {'timezone': 'America/Los_Angeles'}
+    },
+    'send-day-planning-cet': {
+        'task': 'worker.tasks.daily_messages.send_day_planning',
+        'schedule': crontab(hour=8, minute=0),  # 9 AM CET = 8:00 UTC
+        'kwargs': {'timezone': 'Europe/Paris'}
+    },
+    
+    # Mid-day affirmations (12 PM in various timezones)
+    'send-midday-affirmation-utc': {
+        'task': 'worker.tasks.daily_messages.send_midday_affirmation',
+        'schedule': crontab(hour=12, minute=0),
+        'kwargs': {'timezone': 'UTC'}
+    },
+    'send-midday-affirmation-est': {
+        'task': 'worker.tasks.daily_messages.send_midday_affirmation',
+        'schedule': crontab(hour=17, minute=0),  # 12 PM EST = 17:00 UTC
+        'kwargs': {'timezone': 'America/New_York'}
+    },
+    'send-midday-affirmation-pst': {
+        'task': 'worker.tasks.daily_messages.send_midday_affirmation',
+        'schedule': crontab(hour=20, minute=0),  # 12 PM PST = 20:00 UTC
+        'kwargs': {'timezone': 'America/Los_Angeles'}
+    },
+    'send-midday-affirmation-cet': {
+        'task': 'worker.tasks.daily_messages.send_midday_affirmation',
+        'schedule': crontab(hour=11, minute=0),  # 12 PM CET = 11:00 UTC
+        'kwargs': {'timezone': 'Europe/Paris'}
+    },
+    
+    # Evening affirmations (6 PM in various timezones)
+    'send-evening-affirmation-utc': {
+        'task': 'worker.tasks.daily_messages.send_evening_affirmation',
+        'schedule': crontab(hour=18, minute=0),
+        'kwargs': {'timezone': 'UTC'}
+    },
+    'send-evening-affirmation-est': {
+        'task': 'worker.tasks.daily_messages.send_evening_affirmation',
+        'schedule': crontab(hour=23, minute=0),  # 6 PM EST = 23:00 UTC
+        'kwargs': {'timezone': 'America/New_York'}
+    },
+    'send-evening-affirmation-pst': {
+        'task': 'worker.tasks.daily_messages.send_evening_affirmation',
+        'schedule': crontab(hour=2, minute=0),  # 6 PM PST = 02:00 UTC next day
+        'kwargs': {'timezone': 'America/Los_Angeles'}
+    },
+    'send-evening-affirmation-cet': {
+        'task': 'worker.tasks.daily_messages.send_evening_affirmation',
+        'schedule': crontab(hour=17, minute=0),  # 6 PM CET = 17:00 UTC
+        'kwargs': {'timezone': 'Europe/Paris'}
+    },
+    
     # Daily accountability check-ins (7 PM in various timezones - after evening affirmation, before evening gratitude)
     'send-daily-accountability-utc': {
         'task': 'worker.tasks.daily_messages.send_daily_accountability_checkin',
@@ -110,6 +176,28 @@ celery_app.conf.beat_schedule = {
     'send-daily-accountability-cet': {
         'task': 'worker.tasks.daily_messages.send_daily_accountability_checkin',
         'schedule': crontab(hour=18, minute=0),  # 7 PM CET = 18:00 UTC
+        'kwargs': {'timezone': 'Europe/Paris'}
+    },
+    
+    # Weekly reflection and planning (Sunday 10 AM in various timezones)
+    'send-weekly-reflection-utc': {
+        'task': 'worker.tasks.daily_messages.send_weekly_reflection',
+        'schedule': crontab(day_of_week=0, hour=10, minute=0),  # Sunday 10 AM UTC
+        'kwargs': {'timezone': 'UTC'}
+    },
+    'send-weekly-reflection-est': {
+        'task': 'worker.tasks.daily_messages.send_weekly_reflection',
+        'schedule': crontab(day_of_week=0, hour=15, minute=0),  # Sunday 10 AM EST = 15:00 UTC
+        'kwargs': {'timezone': 'America/New_York'}
+    },
+    'send-weekly-reflection-pst': {
+        'task': 'worker.tasks.daily_messages.send_weekly_reflection',
+        'schedule': crontab(day_of_week=0, hour=18, minute=0),  # Sunday 10 AM PST = 18:00 UTC
+        'kwargs': {'timezone': 'America/Los_Angeles'}
+    },
+    'send-weekly-reflection-cet': {
+        'task': 'worker.tasks.daily_messages.send_weekly_reflection',
+        'schedule': crontab(day_of_week=0, hour=9, minute=0),  # Sunday 10 AM CET = 9:00 UTC
         'kwargs': {'timezone': 'Europe/Paris'}
     },
     
