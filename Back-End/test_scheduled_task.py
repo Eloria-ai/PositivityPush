@@ -58,11 +58,13 @@ async def fix_test_subscription():
 async def test_scheduled_tasks():
     """Test all scheduled tasks manually"""
     
-    print("🧪 Testing Scheduled Daily Tasks...")
-    print("=" * 50)
+    print("🧪 Testing ALL Scheduled Daily Tasks...")
+    print("=" * 60)
     
     # First fix the WhatsApp ID format issue
     await fix_test_subscription()
+    
+    print("\n" + "=" * 60)
     
     # Test morning affirmations
     print("\n📅 Testing Morning Affirmations (UTC timezone)...")
@@ -91,8 +93,60 @@ async def test_scheduled_tasks():
     except Exception as e:
         print(f"❌ Evening Gratitude Failed: {e}")
     
-    print("\n" + "=" * 50)
-    print("🎯 Test Complete! Check your WhatsApp for messages.")
+    print("\n" + "=" * 60)
+    print("🆕 TESTING NEW SCHEDULED TASKS...")
+    print("=" * 60)
+    
+    # Test day planning
+    print("\n📝 Testing Day Planning (UTC timezone)...")
+    try:
+        from worker.tasks.daily_messages import send_day_planning
+        result = send_day_planning.delay('UTC')
+        task_result = result.get(timeout=30)
+        print(f"✅ Day Planning Result: {task_result}")
+    except Exception as e:
+        print(f"❌ Day Planning Failed: {e}")
+    
+    # Test midday affirmation
+    print("\n☀️ Testing Midday Affirmation (UTC timezone)...")
+    try:
+        from worker.tasks.daily_messages import send_midday_affirmation
+        result = send_midday_affirmation.delay('UTC')
+        task_result = result.get(timeout=30)
+        print(f"✅ Midday Affirmation Result: {task_result}")
+    except Exception as e:
+        print(f"❌ Midday Affirmation Failed: {e}")
+    
+    # Test evening affirmation
+    print("\n🌙 Testing Evening Affirmation (UTC timezone)...")
+    try:
+        from worker.tasks.daily_messages import send_evening_affirmation
+        result = send_evening_affirmation.delay('UTC')
+        task_result = result.get(timeout=30)
+        print(f"✅ Evening Affirmation Result: {task_result}")
+    except Exception as e:
+        print(f"❌ Evening Affirmation Failed: {e}")
+    
+    # Test weekly reflection
+    print("\n🗓️ Testing Weekly Reflection (UTC timezone)...")
+    try:
+        from worker.tasks.daily_messages import send_weekly_reflection
+        result = send_weekly_reflection.delay('UTC')
+        task_result = result.get(timeout=30)
+        print(f"✅ Weekly Reflection Result: {task_result}")
+    except Exception as e:
+        print(f"❌ Weekly Reflection Failed: {e}")
+    
+    print("\n" + "=" * 60)
+    print("🎯 COMPLETE TEST FINISHED! Check your WhatsApp for 6 new messages:")
+    print("   🌅 Morning Affirmation")
+    print("   📝 Day Planning") 
+    print("   ☀️ Midday Affirmation")
+    print("   💪 Accountability Check-in")
+    print("   🌙 Evening Affirmation")
+    print("   🙏 Evening Gratitude")
+    print("   🗓️ Weekly Reflection")
+    print("=" * 60)
 
 if __name__ == "__main__":
     asyncio.run(test_scheduled_tasks())
