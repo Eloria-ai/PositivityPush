@@ -416,3 +416,143 @@ class AICoachService:
         except Exception as e:
             logger.error(f"Error storing memory for user {user_id}: {e}")
             # Continue without storing - don't break the conversation flow
+
+    async def generate_weekly_reflection(self, user_id: str, user_context: Dict[str, Any]) -> str:
+        """Generate personalized weekly reflection message"""
+        try:
+            user_memories = await self.mem0_service.get_user_context(user_id)
+            
+            system_prompt = core_personality.get_context_aware_personality(
+                context=ConversationContext.WEEKLY_REFLECTION,
+                user_profile=user_context
+            )
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Generate a weekly reflection prompt"}
+                ],
+                max_tokens=120,
+                temperature=0.8
+            )
+            
+            reflection = response.choices[0].message.content.strip()
+            
+            # Store in mem0
+            await self.mem0_service.add_memory(
+                messages=[{"role": "assistant", "content": reflection}],
+                user_id=user_id,
+                metadata={"interaction_type": "weekly_reflection", "date": datetime.now().isoformat()}
+            )
+            
+            return reflection
+            
+        except Exception as e:
+            logger.error(f"Error generating weekly reflection: {e}")
+            return "🗓️ Hey there! As we start a new week, let's take a moment to reflect. What's one thing you learned about yourself this past week? What are you looking forward to in the days ahead?"
+
+    async def generate_day_planning(self, user_id: str, user_context: Dict[str, Any]) -> str:
+        """Generate personalized day planning message"""
+        try:
+            user_memories = await self.mem0_service.get_user_context(user_id)
+            
+            system_prompt = core_personality.get_context_aware_personality(
+                context=ConversationContext.DAY_PLANNING,
+                user_profile=user_context
+            )
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Generate a day planning message"}
+                ],
+                max_tokens=100,
+                temperature=0.7
+            )
+            
+            planning = response.choices[0].message.content.strip()
+            
+            # Store in mem0
+            await self.mem0_service.add_memory(
+                messages=[{"role": "assistant", "content": planning}],
+                user_id=user_id,
+                metadata={"interaction_type": "day_planning", "date": datetime.now().isoformat()}
+            )
+            
+            return planning
+            
+        except Exception as e:
+            logger.error(f"Error generating day planning: {e}")
+            return "📝 Good morning! Let's set some intentions for today. What's one thing you want to focus on that will make you feel accomplished by tonight?"
+
+    async def generate_midday_affirmation(self, user_id: str, user_context: Dict[str, Any]) -> str:
+        """Generate personalized midday affirmation"""
+        try:
+            user_memories = await self.mem0_service.get_user_context(user_id)
+            
+            system_prompt = core_personality.get_context_aware_personality(
+                context=ConversationContext.MIDDAY_BOOST,
+                user_profile=user_context
+            )
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Generate a midday affirmation"}
+                ],
+                max_tokens=80,
+                temperature=0.8
+            )
+            
+            affirmation = response.choices[0].message.content.strip()
+            
+            # Store in mem0
+            await self.mem0_service.add_memory(
+                messages=[{"role": "assistant", "content": affirmation}],
+                user_id=user_id,
+                metadata={"interaction_type": "midday_affirmation", "date": datetime.now().isoformat()}
+            )
+            
+            return affirmation
+            
+        except Exception as e:
+            logger.error(f"Error generating midday affirmation: {e}")
+            return "☀️ You're doing great! Take a deep breath and remember - you have the strength to handle whatever comes your way today. Keep going!"
+
+    async def generate_evening_affirmation(self, user_id: str, user_context: Dict[str, Any]) -> str:
+        """Generate personalized evening affirmation"""
+        try:
+            user_memories = await self.mem0_service.get_user_context(user_id)
+            
+            system_prompt = core_personality.get_context_aware_personality(
+                context=ConversationContext.EVENING_WIND_DOWN,
+                user_profile=user_context
+            )
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Generate an evening affirmation"}
+                ],
+                max_tokens=80,
+                temperature=0.8
+            )
+            
+            affirmation = response.choices[0].message.content.strip()
+            
+            # Store in mem0
+            await self.mem0_service.add_memory(
+                messages=[{"role": "assistant", "content": affirmation}],
+                user_id=user_id,
+                metadata={"interaction_type": "evening_affirmation", "date": datetime.now().isoformat()}
+            )
+            
+            return affirmation
+            
+        except Exception as e:
+            logger.error(f"Error generating evening affirmation: {e}")
+            return "🌙 You've made it through another day, and that's something to be proud of. Rest knowing you did your best, and tomorrow brings new possibilities."

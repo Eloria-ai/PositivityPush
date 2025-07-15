@@ -17,6 +17,10 @@ class ConversationContext(Enum):
     CRISIS_SUPPORT = "crisis_support"
     GOAL_SETTING = "goal_setting"
     PROGRESS_CELEBRATION = "progress_celebration"
+    WEEKLY_REFLECTION = "weekly_reflection"
+    DAY_PLANNING = "day_planning"
+    MIDDAY_BOOST = "midday_boost"
+    EVENING_WIND_DOWN = "evening_wind_down"
 
 @dataclass
 class PersonalityTrait:
