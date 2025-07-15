@@ -7,7 +7,7 @@ import openai
 import json
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.config import settings
 from app.services.mem0_client import Mem0Service
@@ -182,38 +182,49 @@ class AICoachService:
         user_id: str, 
         user_context: Dict[str, Any]
     ) -> str:
-        """Generate personalized daily affirmation using personality system"""
+        """Generate personalized morning affirmation following system prompt specifications"""
         try:
             user_memories = await self.mem0_service.get_memories(user_id)
             
-            # Build user profile for personalization
-            user_profile_data = {
-                'goals': user_context.get('goals', ''),
-                'recent_challenges': user_context.get('challenges', ''),
-                'communication_style': user_context.get('communication_style', ''),
-                'progress_notes': user_memories[:200] if user_memories else 'New user'
-            }
+            # Get user's recent context and challenges
+            recent_context = ""
+            if user_memories:
+                recent_context = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
             
-            system_prompt = core_personality.get_context_aware_personality(
-                context=ConversationContext.DAILY_AFFIRMATION,
-                user_profile=user_profile_data
-            )
+            # System prompt based on specifications
+            system_prompt = f"""You are a friendly Morning Affirmation Coach.
+
+CORE RULES:
+• Send exactly ONE short affirmation (1-2 lines max, ~20 words)
+• Match user's pronoun preference (first-person "I..." or second-person "You...")
+• Use recent context: wins, challenges, emotions from conversations
+• Keep language simple, uplifting, under 20 words
+• Avoid clichés; vary vocabulary and structure daily
+• Rotate themes: confidence, gratitude, resilience, focus, optimism, kindness, growth
+• Never bundle multiple affirmations; one powerful idea only
+
+USER CONTEXT:
+- Recent conversations: {recent_context[:300] if recent_context else 'New user starting their journey'}
+- Goals: {user_context.get('personal_goals', 'personal growth')}
+- Plan: {user_context.get('plan_type', '3_month')} subscription
+
+Generate a single, concise morning affirmation that feels personal and resonates with their current situation."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "Generate today's personalized morning affirmation for this user"}
+                    {"role": "user", "content": "Generate today's personalized morning affirmation"}
                 ],
-                max_tokens=120,
-                temperature=0.9
+                max_tokens=50,  # Reduced for conciseness
+                temperature=0.8
             )
             
             affirmation = response.choices[0].message.content.strip()
             
             # Store in mem0
             affirmation_messages = [
-                {"role": "system", "content": "Daily affirmation generated"},
+                {"role": "system", "content": "Morning affirmation generated"},
                 {"role": "assistant", "content": affirmation}
             ]
             await self.mem0_service.add_memory(
@@ -226,36 +237,63 @@ class AICoachService:
             
         except Exception as e:
             logger.error(f"Error generating daily affirmation: {e}")
-            # Use personality system fallback
-            fallbacks = core_personality.get_fallback_responses(ConversationContext.DAILY_AFFIRMATION)
-            return fallbacks[0]
+            # Simple, effective fallback
+            fallbacks = [
+                "You are capable, confident, and ready for today.",
+                "Every small step today moves you closer to your goals.",
+                "You radiate positivity, and good things flow to you.",
+                "I am exactly where I need to be; growth is happening."
+            ]
+            import random
+            return random.choice(fallbacks)
     
     async def generate_gratitude_prompt(
         self, 
         user_id: str, 
         user_context: Dict[str, Any]
     ) -> str:
-        """Generate personalized evening gratitude prompt"""
+        """Generate personalized evening gratitude prompt following system prompt specifications"""
         try:
             user_memories = await self.mem0_service.get_memories(user_id)
             
-            system_prompt = f"""You are a thoughtful AI life coach. Create an evening gratitude prompt that:
-            - Reflects on the user's recent experiences or goals
-            - Asks a specific, meaningful question about gratitude
-            - Is personal and connected to their journey
-            - Encourages reflection without being generic
-            - Keep it under 40 words
+            # Get day's context for gratitude reflection
+            day_context = ""
+            if user_memories:
+                # Look for wins, people, comforts, challenges from today
+                day_context = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
             
-            User context: {user_memories[:500] if user_memories else 'New user'}
-            """
+            # System prompt based on specifications
+            system_prompt = f"""You are a soothing Night-Gratitude Coach.
+
+CORE RULES:
+• Send exactly ONE gentle gratitude prompt (1-3 softly-flowing sentences, ≤40 words total)
+• Tailor to wins, people, comforts, challenges gathered during the day
+• Tone = quiet, warm, sleep-friendly. No exclamation marks unless user prefers high energy
+• Encourage reflection; do NOT ask for typed reply (unless user likes journaling)
+• Vary phrasing nightly; avoid repeating opener within 7 days
+• Rotate themes: simple joys, supportive people, lessons learned, personal growth, physical comforts, hopes for tomorrow
+• End with calm cadence—no action items, no second question
+
+GRATITUDE THEMES:
+• Help end day in appreciation and calm
+• Reference specific context: supportive people, warm comforts, lessons from setbacks
+• Invite noticing/feeling/remembering blessings
+• Use gentle imagery (quiet night, steady breath)
+
+USER CONTEXT:
+- Day's experiences: {day_context[:200] if day_context else 'New user ending their day peacefully'}
+- Goals: {user_context.get('personal_goals', 'personal growth')}
+- Tone preference: {user_context.get('communication_style', 'warm and gentle')}
+
+Generate a single, gentle gratitude prompt that invites peaceful reflection without requiring a response."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "Generate tonight's gratitude reflection prompt"}
+                    {"role": "user", "content": "Generate tonight's gratitude prompt"}
                 ],
-                max_tokens=80,
+                max_tokens=70,  # For gentle, flowing sentences
                 temperature=0.8
             )
             
@@ -263,7 +301,7 @@ class AICoachService:
             
             # Store in mem0
             gratitude_messages = [
-                {"role": "system", "content": "Gratitude prompt generated"},
+                {"role": "system", "content": "Evening gratitude prompt generated"},
                 {"role": "assistant", "content": prompt}
             ]
             await self.mem0_service.add_memory(
@@ -276,39 +314,63 @@ class AICoachService:
             
         except Exception as e:
             logger.error(f"Error generating gratitude prompt: {e}")
-            return "As you wind down tonight, what's one small moment from today that brought you joy or peace? 🌙"
+            # Gentle fallbacks based on system prompt examples
+            fallbacks = [
+                "As you settle in tonight, notice one small joy that warmed your day and let it soothe you to sleep.",
+                "Before you drift off, breathe in gratitude for the lessons today offered and the people who stood beside you.",
+                "Let the quiet of the night remind you of every gentle moment—each one proof you are supported and safe.",
+                "Feel your heartbeat, recall a smile, and rest knowing today added another bright thread to your journey."
+            ]
+            import random
+            return random.choice(fallbacks)
     
     async def generate_accountability_checkin(self, user_id: str, user_context: Dict[str, Any]) -> str:
-        """Generate personalized accountability check-in message"""
+        """Generate personalized accountability check-in following 4-step interactive flow"""
         try:
             # Get user's memories for personalization
-            user_memories = await self.mem0_service.get_user_context(user_id)
+            user_memories = await self.mem0_service.get_memories(user_id)
             
-            system_prompt = f"""You are a supportive AI accountability coach for Positivity Push. Create a daily check-in message that:
-            - Asks about their specific goals/habits (gym, work, personal growth)
-            - References their previous commitments or challenges
-            - Is encouraging and non-judgmental 
-            - Asks for a simple update on their progress
-            - Keeps it conversational and under 80 words
-            - Uses 1-2 emojis meaningfully
+            # Get morning plan for reference
+            morning_plan = ""
+            if user_memories:
+                # Look for today's planning or goals
+                for mem in user_memories[:5]:
+                    if 'planning' in mem.get('memory', '').lower() or 'goals' in mem.get('memory', '').lower():
+                        morning_plan = mem.get('memory', '')[:200]
+                        break
             
-            USER CONTEXT:
-            - Goals: {user_context.get('goals', 'personal growth')}
-            - Challenges: {user_context.get('challenges', 'building consistency')}
-            - Plan: {user_context.get('plan_type', '3_month')}
-            
-            THEIR HISTORY:
-            {user_memories}
-            
-            Ask them how they're doing with their specific commitments today."""
+            # System prompt based on 4-step specifications
+            system_prompt = f"""You are a gentle, motivating Accountability Coach.
+
+CORE RULES:
+• Use 4-step structure: Check-In → Celebrate → Reflect → Encourage
+• Ask ONE question at a time (≤30 words each)
+• Reference user's morning to-do list for personal connection
+• Vary wording nightly; treat examples as inspiration, not scripts
+• Keep tone supportive, non-judgmental
+• Celebrate effort first, then discuss unfinished tasks
+• End with single uplifting line looking toward tomorrow
+
+4-STEP STRUCTURE:
+STEP 1 - Gentle Check-In & Recap: Greet and recap today's planned tasks, ask which were completed
+STEP 2 - Celebrate Wins: Acknowledge accomplishments enthusiastically but authentically  
+STEP 3 - Reflection: Ask what got in the way / what they learned (compassionate wording)
+STEP 4 - Encouragement: Reinforce that showing up matters, invite small adjustment for tomorrow
+
+USER CONTEXT:
+- Morning plan: {morning_plan if morning_plan else 'General goals and intentions'}
+- Goals: {user_context.get('personal_goals', 'personal growth')}
+- Recent context: {user_memories[0].get('memory', 'New user') if user_memories else 'New user'}
+
+Generate ONLY the first step: a gentle check-in that recaps their morning plan and asks about completion."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Generate daily accountability check-in for user with context: {user_context}"}
+                    {"role": "user", "content": "Generate the first step: gentle check-in and recap of today's goals"}
                 ],
-                max_tokens=150,
+                max_tokens=80,  # Reduced for conciseness
                 temperature=0.7
             )
             
@@ -316,7 +378,7 @@ class AICoachService:
             
             # Store in mem0
             checkin_messages = [
-                {"role": "system", "content": "Daily accountability check-in sent"},
+                {"role": "system", "content": "Daily accountability check-in (Step 1) sent"},
                 {"role": "assistant", "content": checkin_message}
             ]
             await self.mem0_service.add_memory(
@@ -329,7 +391,15 @@ class AICoachService:
             
         except Exception as e:
             logger.error(f"Error generating accountability check-in: {e}")
-            return "Hey! How are you doing with your goals today? Any wins, big or small, you'd like to share? 💪"
+            # Varied fallbacks based on system prompt examples
+            fallbacks = [
+                "Let's look back at your day! What did you accomplish from your morning goals? What's still pending?",
+                "Quick recap: How did your planned tasks play out today? What made the cut?",
+                "Time to check in! Which goals from this morning did you tackle? What's left for tomorrow?",
+                "Let's review your day! From your morning plan, what got done and what's still open?"
+            ]
+            import random
+            return random.choice(fallbacks)
     
     def _build_coach_system_prompt(
         self, 
@@ -418,22 +488,55 @@ class AICoachService:
             # Continue without storing - don't break the conversation flow
 
     async def generate_weekly_reflection(self, user_id: str, user_context: Dict[str, Any]) -> str:
-        """Generate personalized weekly reflection message"""
+        """Generate personalized weekly reflection following dynamic conversation flow"""
         try:
-            user_memories = await self.mem0_service.get_user_context(user_id)
+            user_memories = await self.mem0_service.get_memories(user_id)
             
-            system_prompt = core_personality.get_context_aware_personality(
-                context=ConversationContext.WEEKLY_REFLECTION,
-                user_profile=user_context
-            )
+            # Check if this is a first-time user (no past week data)
+            has_past_week_data = False
+            if user_memories:
+                # Look for interactions from past week
+                week_ago = datetime.now() - timedelta(days=7)
+                for mem in user_memories:
+                    if 'timestamp' in mem and datetime.fromisoformat(mem['timestamp']) > week_ago:
+                        has_past_week_data = True
+                        break
+            
+            # Get past week context for returning users
+            past_week_context = ""
+            if has_past_week_data and user_memories:
+                past_week_context = " ".join([mem.get('memory', '') for mem in user_memories[:5]])
+            
+            # System prompt based on specifications
+            system_prompt = f"""You are a warm, supportive Weekly Reflection & Planning Coach.
+
+CORE RULES:
+• One prompt at a time - wait for user's reply before continuing
+• Keep tone encouraging and non-judgmental
+• Celebrate effort; normalize unfinished tasks
+• Dynamically craft questions to match user's context and history
+• Keep wording natural, not scripted
+
+USER STATUS: {'First-time user' if not has_past_week_data else 'Returning user with past week data'}
+
+{'FIRST-TIME USER FLOW - Skip reflection, start with planning:' if not has_past_week_data else 'RETURNING USER FLOW - Start with reflection:'}
+{'• Invite user to share what they want to accomplish in their very first week' if not has_past_week_data else '• Greet and cue reflection (mention last week goals if available)'}
+{'• Ask for one key habit/action they want to focus on' if not has_past_week_data else '• Ask what was accomplished and what they are proud of'}
+
+USER CONTEXT:
+- Past week data: {past_week_context[:300] if past_week_context else 'No past week interactions available'}
+- Goals: {user_context.get('personal_goals', 'personal growth and reflection')}
+- Plan: {user_context.get('plan_type', '3_month')} subscription
+
+Generate the appropriate opening prompt based on whether this is their first weekly session or returning session."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "Generate a weekly reflection prompt"}
+                    {"role": "user", "content": f"Generate {'first-time' if not has_past_week_data else 'returning'} user weekly reflection opening"}
                 ],
-                max_tokens=120,
+                max_tokens=100,  # For dynamic, personalized prompts
                 temperature=0.8
             )
             
@@ -443,32 +546,68 @@ class AICoachService:
             await self.mem0_service.add_memory(
                 messages=[{"role": "assistant", "content": reflection}],
                 user_id=user_id,
-                metadata={"interaction_type": "weekly_reflection", "date": datetime.now().isoformat()}
+                metadata={
+                    "interaction_type": "weekly_reflection", 
+                    "date": datetime.now().isoformat(),
+                    "user_status": "first_time" if not has_past_week_data else "returning"
+                }
             )
             
             return reflection
             
         except Exception as e:
             logger.error(f"Error generating weekly reflection: {e}")
-            return "🗓️ Hey there! As we start a new week, let's take a moment to reflect. What's one thing you learned about yourself this past week? What are you looking forward to in the days ahead?"
+            # Varied fallbacks for different user types
+            fallbacks = [
+                "🗓️ Welcome to your first weekly session! What would you love to accomplish or focus on in this very first week?",
+                "🗓️ Let's reflect on your week! Looking back at your recent goals, what went especially well for you?",
+                "🗓️ Time for our weekly check-in! What's one win from this past week that you're most proud of?",
+                "🗓️ As we start a new week, let's take a moment to reflect. What did you learn about yourself this past week?"
+            ]
+            import random
+            return random.choice(fallbacks)
 
     async def generate_day_planning(self, user_id: str, user_context: Dict[str, Any]) -> str:
-        """Generate personalized day planning message"""
+        """Generate personalized day planning prompt following system prompt specifications"""
         try:
-            user_memories = await self.mem0_service.get_user_context(user_id)
+            user_memories = await self.mem0_service.get_memories(user_id)
             
-            system_prompt = core_personality.get_context_aware_personality(
-                context=ConversationContext.DAY_PLANNING,
-                user_profile=user_context
-            )
+            # Get user's planning patterns and preferences
+            planning_history = ""
+            if user_memories:
+                planning_history = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
+            
+            # System prompt based on specifications
+            system_prompt = f"""You are the user's friendly Day-Planning Coach.
+
+CORE RULES:
+• Send ONE planning prompt at a time (≤30 words)
+• Keep prompts short (~2 sentences) and upbeat
+• Vary phrasing day-to-day; avoid repeating same opener within 5 days
+• Adapt to user's style (formal/casual, emoji-friendly, etc.)
+• No judgment or evaluation—only guidance and encouragement
+• Reference that morning affirmation just sent for positive transition
+
+GENERATION WORKFLOW:
+• Start with motivating opener: "Now that you're charged up..." / "Let's set you up for success..."
+• Ask user to write/list today's tasks/goals (work, personal, self-care)
+• Keep under 30 words
+• Clear call to action (write, list, jot, type)
+
+USER CONTEXT:
+- Planning patterns: {planning_history[:200] if planning_history else 'New user starting planning journey'}
+- Goals: {user_context.get('personal_goals', 'personal growth')}
+- Style preference: {user_context.get('communication_style', 'friendly and encouraging')}
+
+Generate a single, engaging day planning prompt that motivates them to list their daily goals."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "Generate a day planning message"}
+                    {"role": "user", "content": "Generate today's day planning prompt"}
                 ],
-                max_tokens=100,
+                max_tokens=60,  # Reduced for conciseness
                 temperature=0.7
             )
             
@@ -485,25 +624,59 @@ class AICoachService:
             
         except Exception as e:
             logger.error(f"Error generating day planning: {e}")
-            return "📝 Good morning! Let's set some intentions for today. What's one thing you want to focus on that will make you feel accomplished by tonight?"
+            # Varied fallbacks based on system prompt examples
+            fallbacks = [
+                "Now that you've started your day on a high note, let's plan your day. What tasks or goals do you want to tackle?",
+                "You're ready to make today amazing! List your top priorities—work, personal, or self-care.",
+                "Let's set you up for success. Jot down your to-do's, big or small; every step counts.",
+                "It's a fresh start—plan your day: what would make you feel proud by bedtime?"
+            ]
+            import random
+            return random.choice(fallbacks)
 
     async def generate_midday_affirmation(self, user_id: str, user_context: Dict[str, Any]) -> str:
-        """Generate personalized midday affirmation"""
+        """Generate personalized midday affirmation following system prompt specifications"""
         try:
-            user_memories = await self.mem0_service.get_user_context(user_id)
+            user_memories = await self.mem0_service.get_memories(user_id)
             
-            system_prompt = core_personality.get_context_aware_personality(
-                context=ConversationContext.MIDDAY_BOOST,
-                user_profile=user_context
-            )
+            # Get morning context and current state
+            morning_context = ""
+            if user_memories:
+                # Look for morning planning or recent interactions
+                morning_context = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
+            
+            # System prompt based on specifications
+            system_prompt = f"""You are an encouraging Mid-Day Affirmation Coach.
+
+CORE RULES:
+• Send exactly ONE short affirmation (1-2 lines max, ~20 words)
+• Match user's pronoun preference ("I..." or "You..." format)
+• Tailor to morning goals, current energy level, or obstacles from today
+• Keep language simple, upbeat, under 20 words
+• Vary themes: progress, focus, calm, resilience, gratitude, optimism
+• Rotate vocabulary - no direct repeat within 7 days
+• Never bundle multiple affirmations; one clear idea per message
+
+MIDDAY THEMES:
+• Acknowledge progress so far ("so far today...")
+• Renew motivation ("plenty of hours left")
+• Provide mid-day energy boost
+• Reference morning goals/plans when relevant
+
+USER CONTEXT:
+- Morning context: {morning_context[:200] if morning_context else 'New user continuing their day'}
+- Goals: {user_context.get('personal_goals', 'personal growth')}
+- Energy level: Mid-day refresh needed
+
+Generate a single, energizing midday affirmation that acknowledges progress and renews motivation."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "Generate a midday affirmation"}
+                    {"role": "user", "content": "Generate today's midday affirmation"}
                 ],
-                max_tokens=80,
+                max_tokens=50,  # Reduced for conciseness
                 temperature=0.8
             )
             
@@ -520,25 +693,60 @@ class AICoachService:
             
         except Exception as e:
             logger.error(f"Error generating midday affirmation: {e}")
-            return "☀️ You're doing great! Take a deep breath and remember - you have the strength to handle whatever comes your way today. Keep going!"
+            # Varied fallbacks based on system prompt examples
+            fallbacks = [
+                "I am proud of what I've accomplished so far today.",
+                "There's still so much potential left in this day.",
+                "You are focused, productive, and capable.",
+                "Even small progress is progress—celebrate it.",
+                "I release stress and invite calm into the rest of my day."
+            ]
+            import random
+            return random.choice(fallbacks)
 
     async def generate_evening_affirmation(self, user_id: str, user_context: Dict[str, Any]) -> str:
-        """Generate personalized evening affirmation"""
+        """Generate personalized evening affirmation following system prompt specifications"""
         try:
-            user_memories = await self.mem0_service.get_user_context(user_id)
+            user_memories = await self.mem0_service.get_memories(user_id)
             
-            system_prompt = core_personality.get_context_aware_personality(
-                context=ConversationContext.EVENING_WIND_DOWN,
-                user_profile=user_context
-            )
+            # Get day's context for evening reflection
+            day_context = ""
+            if user_memories:
+                # Look for day's activities, challenges, wins
+                day_context = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
+            
+            # System prompt based on specifications
+            system_prompt = f"""You are a calm, reassuring Evening Affirmation Coach.
+
+CORE RULES:
+• Send exactly ONE short affirmation (1-2 lines max, ~20 words)
+• Match user's pronoun style ("I..." or "You..." format)
+• Tailor to the day's tasks completed, challenges shared, emotions expressed
+• Use calming language; keep to ~20 words
+• Rotate themes: self-forgiveness, gratitude, peace, progress, hope
+• Ensure no verbatim repeat within 7 days
+• Never send multiple affirmations; one clear, gentle thought only
+
+EVENING THEMES:
+• Help user release the day and invite rest
+• Acknowledge day's effort, wins, and lessons
+• Validate effort and signal peace/hope for tomorrow
+• Use calming language suitable for bedtime
+
+USER CONTEXT:
+- Day's experiences: {day_context[:200] if day_context else 'New user ending their day'}
+- Goals: {user_context.get('personal_goals', 'personal growth')}
+- Current mood: Preparing for rest and reflection
+
+Generate a single, soothing evening affirmation that helps them release today and welcome peaceful rest."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": "Generate an evening affirmation"}
+                    {"role": "user", "content": "Generate tonight's evening affirmation"}
                 ],
-                max_tokens=80,
+                max_tokens=50,  # Reduced for conciseness
                 temperature=0.8
             )
             
@@ -555,4 +763,13 @@ class AICoachService:
             
         except Exception as e:
             logger.error(f"Error generating evening affirmation: {e}")
-            return "🌙 You've made it through another day, and that's something to be proud of. Rest knowing you did your best, and tomorrow brings new possibilities."
+            # Varied calming fallbacks based on system prompt examples
+            fallbacks = [
+                "I did my best today, and that is enough.",
+                "You let go of today's worries and invite peace tonight.",
+                "I release what I can't control; calm fills me now.",
+                "You are safe, loved, and ready for rest.",
+                "I'm grateful for today's lessons; tomorrow is new possibility."
+            ]
+            import random
+            return random.choice(fallbacks)

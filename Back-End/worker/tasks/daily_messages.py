@@ -121,10 +121,10 @@ async def _send_morning_affirmations_async(timezone):
         try:
             logger.info(f"👤 Processing subscriber: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
             
-            # Skip if user has already received affirmation today
-            if await _already_received_message_today(subscriber['id'], 'daily_affirmation', supabase_service):
-                logger.info(f"⏭️ Skipping {subscriber['email']} - already received message today")
-                continue
+            # TEMPORARILY DISABLED: Skip if user has already received affirmation today
+            # if await _already_received_message_today(subscriber['id'], 'daily_affirmation', supabase_service):
+            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received message today")
+            #     continue
             
             # Generate personalized affirmation
             affirmation = await ai_coach.generate_daily_affirmation(
@@ -189,9 +189,9 @@ async def _send_evening_gratitude_async(timezone):
     
     for subscriber in subscribers:
         try:
-            # Skip if user has already received gratitude prompt today
-            if await _already_received_message_today(subscriber['id'], 'gratitude_prompt', supabase_service):
-                continue
+            # TEMPORARILY DISABLED: Skip if user has already received gratitude prompt today
+            # if await _already_received_message_today(subscriber['id'], 'gratitude_prompt', supabase_service):
+            #     continue
             
             # Generate personalized gratitude prompt
             gratitude_prompt = await ai_coach.generate_gratitude_prompt(
@@ -260,10 +260,10 @@ async def _send_weekly_reflection_async(timezone):
         try:
             logger.info(f"👤 Processing weekly reflection for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
             
-            # Skip if user has already received weekly reflection this week
-            if await _already_received_message_this_week(subscriber['id'], 'weekly_reflection', supabase_service):
-                logger.info(f"⏭️ Skipping {subscriber['email']} - already received weekly reflection this week")
-                continue
+            # TEMPORARILY DISABLED: Skip if user has already received weekly reflection this week
+            # if await _already_received_message_this_week(subscriber['id'], 'weekly_reflection', supabase_service):
+            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received weekly reflection this week")
+            #     continue
             
             # Generate personalized weekly reflection
             reflection = await ai_coach.generate_weekly_reflection(
@@ -332,10 +332,10 @@ async def _send_day_planning_async(timezone):
         try:
             logger.info(f"👤 Processing day planning for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
             
-            # Skip if user has already received day planning today
-            if await _already_received_message_today(subscriber['id'], 'day_planning', supabase_service):
-                logger.info(f"⏭️ Skipping {subscriber['email']} - already received day planning today")
-                continue
+            # TEMPORARILY DISABLED: Skip if user has already received day planning today
+            # if await _already_received_message_today(subscriber['id'], 'day_planning', supabase_service):
+            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received day planning today")
+            #     continue
             
             # Generate personalized day planning
             planning = await ai_coach.generate_day_planning(
@@ -404,10 +404,10 @@ async def _send_midday_affirmation_async(timezone):
         try:
             logger.info(f"👤 Processing mid-day affirmation for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
             
-            # Skip if user has already received mid-day affirmation today
-            if await _already_received_message_today(subscriber['id'], 'midday_affirmation', supabase_service):
-                logger.info(f"⏭️ Skipping {subscriber['email']} - already received mid-day affirmation today")
-                continue
+            # TEMPORARILY DISABLED: Skip if user has already received mid-day affirmation today
+            # if await _already_received_message_today(subscriber['id'], 'midday_affirmation', supabase_service):
+            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received mid-day affirmation today")
+            #     continue
             
             # Generate personalized mid-day affirmation
             affirmation = await ai_coach.generate_midday_affirmation(
@@ -476,10 +476,10 @@ async def _send_evening_affirmation_async(timezone):
         try:
             logger.info(f"👤 Processing evening affirmation for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
             
-            # Skip if user has already received evening affirmation today
-            if await _already_received_message_today(subscriber['id'], 'evening_affirmation', supabase_service):
-                logger.info(f"⏭️ Skipping {subscriber['email']} - already received evening affirmation today")
-                continue
+            # TEMPORARILY DISABLED: Skip if user has already received evening affirmation today
+            # if await _already_received_message_today(subscriber['id'], 'evening_affirmation', supabase_service):
+            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received evening affirmation today")
+            #     continue
             
             # Generate personalized evening affirmation
             affirmation = await ai_coach.generate_evening_affirmation(
@@ -551,9 +551,9 @@ async def _send_weekly_check_ins_async(timezone):
     
     for subscriber in subscribers:
         try:
-            # Skip if user received check-in this week
-            if await _already_received_message_this_week(subscriber['id'], 'weekly_check_in', supabase_service):
-                continue
+            # TEMPORARILY DISABLED: Skip if user received check-in this week
+            # if await _already_received_message_this_week(subscriber['id'], 'weekly_check_in', supabase_service):
+            #     continue
             
             # Choose check-in message based on user ID (for variety)
             message_index = hash(subscriber['id']) % len(check_in_messages)

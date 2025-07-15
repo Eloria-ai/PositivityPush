@@ -38,19 +38,8 @@ async def fix_test_subscription():
         
         print(f"📱 Current WhatsApp ID: {current_wa_id}")
         
-        if current_wa_id and current_wa_id.startswith("+"):
-            # Remove the + prefix
-            new_wa_id = current_wa_id[1:]  # Remove first character (+)
-            
-            # Update the record
-            await supabase_service.update_subscription(
-                subscriber["id"], 
-                {"wa_id": new_wa_id}
-            )
-            
-            print(f"✅ Updated WhatsApp ID from {current_wa_id} to {new_wa_id}")
-        else:
-            print(f"✅ WhatsApp ID format is already correct: {current_wa_id}")
+        # Keep WhatsApp ID as-is - no automatic modifications
+        print(f"ℹ️ WhatsApp ID will be used as-is: {current_wa_id}")
         
     except Exception as e:
         print(f"❌ Error fixing WhatsApp ID: {e}")
