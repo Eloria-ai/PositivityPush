@@ -10,10 +10,11 @@ from datetime import datetime
 import re
 from enum import Enum
 import json
+import openai
 
 from app.services.supabase_client import SupabaseService
 from app.services.timezone_detector import TimezoneDetector
-from app.services.openai_client import OpenAIClient
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,8 @@ class OnboardingService:
     def __init__(self, supabase_service: SupabaseService):
         self.supabase = supabase_service
         self.timezone_detector = TimezoneDetector()
-        self.openai_client = OpenAIClient()
+        self.openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.model = settings.OPENAI_MODEL
         
         # Conversation flow mapping
         self.step_flow = {
@@ -263,11 +265,20 @@ class OnboardingService:
             Return only the time in HH:MM format, nothing else.
             """
             
-            response = await self.openai_client.get_completion(prompt)
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=50,
+                temperature=0.3
+            )
+            
+            result = response.choices[0].message.content.strip()
             
             # Validate the response format
-            if response and re.match(r'^[0-2][0-9]:[0-5][0-9]$', response.strip()):
-                return response.strip()
+            if result and re.match(r'^[0-2][0-9]:[0-5][0-9]$', result):
+                return result
             
             return None
         except Exception as e:
@@ -296,12 +307,21 @@ class OnboardingService:
             Return only the JSON object, nothing else.
             """
             
-            response = await self.openai_client.get_completion(prompt)
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=100,
+                temperature=0.3
+            )
+            
+            result = response.choices[0].message.content.strip()
             
             # Parse the JSON response
-            if response:
+            if result:
                 try:
-                    data = json.loads(response.strip())
+                    data = json.loads(result.strip())
                     day = data.get('day', '').lower()
                     time_str = data.get('time', '')
                     
@@ -315,7 +335,7 @@ class OnboardingService:
                         return day, time_str
                     
                 except json.JSONDecodeError:
-                    logger.error(f"Invalid JSON response from OpenAI: {response}")
+                    logger.error(f"Invalid JSON response from OpenAI: {result}")
             
             return None, None
         except Exception as e:
