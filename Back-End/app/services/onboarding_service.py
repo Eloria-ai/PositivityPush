@@ -54,15 +54,15 @@ class OnboardingService:
             OnboardingStep.WEEKLY_REFLECTION: OnboardingStep.COMPLETED
         }
         
-        # Questions for each step
-        self.questions = {
-            OnboardingStep.START: "⏰ What time would you like to receive your **morning affirmation**? (e.g., 7:00 AM, 8:30 AM)",
-            OnboardingStep.MORNING_AFFIRMATION: "📝 What time do you prefer to **plan your day**? (e.g., 8:00 AM, 9:00 AM)",
-            OnboardingStep.DAY_PLANNING: "☀️ When would you like a **midday motivation boost**? (e.g., 12:00 PM, 1:00 PM)",
-            OnboardingStep.MIDDAY_AFFIRMATION: "🌅 What time would you like your **evening wind-down message**? (e.g., 6:00 PM, 7:00 PM)",
-            OnboardingStep.EVENING_AFFIRMATION: "💪 When should I **check in about your daily progress**? (e.g., 7:00 PM, 8:00 PM)",
-            OnboardingStep.ACCOUNTABILITY_CHECKIN: "🌙 Around what time do you usually **go to bed**? (This helps time your gratitude message, e.g., 9:00 PM, 10:30 PM)",
-            OnboardingStep.SLEEP_TIME: "🗓️ Which **day and time** would you like your weekly reflection? (e.g., Sunday 10:00 AM, Monday 9:00 AM)"
+        # Question contexts for dynamic LLM generation
+        self.question_contexts = {
+            OnboardingStep.START: {"type": "morning_affirmation", "emoji": "⏰"},
+            OnboardingStep.MORNING_AFFIRMATION: {"type": "day_planning", "emoji": "📝"}, 
+            OnboardingStep.DAY_PLANNING: {"type": "midday_motivation", "emoji": "☀️"},
+            OnboardingStep.MIDDAY_AFFIRMATION: {"type": "evening_winddown", "emoji": "🌅"},
+            OnboardingStep.EVENING_AFFIRMATION: {"type": "progress_checkin", "emoji": "💪"},
+            OnboardingStep.ACCOUNTABILITY_CHECKIN: {"type": "bedtime_gratitude", "emoji": "🌙"},
+            OnboardingStep.SLEEP_TIME: {"type": "weekly_reflection", "emoji": "🗓️"}
         }
         
         # Clarification messages
@@ -136,10 +136,14 @@ class OnboardingService:
                     # Move to next step
                     await self.supabase.set_preference_value(user_id, "onboarding_step", next_step.value)
                     
+                    # Get updated preferences for personalized question
+                    updated_preferences = await self.supabase.get_user_preferences(user_id)
+                    personalized_question = await self.generate_personalized_question(next_step, updated_preferences)
+                    
                     return {
                         "is_onboarding": True,
                         "completed": False,
-                        "message": self.questions.get(next_step)
+                        "message": personalized_question
                     }
             else:
                 # Invalid response - ask for clarification
@@ -171,10 +175,14 @@ class OnboardingService:
             # Set initial state to START step
             await self.supabase.set_preference_value(user_id, "onboarding_step", OnboardingStep.START.value)
             
+            # Generate personalized first question
+            user_preferences = await self.supabase.get_user_preferences(user_id)
+            first_question = await self.generate_personalized_question(OnboardingStep.START, user_preferences)
+            
             # Return messages for Celery to send
             return {
                 "welcome_message": self.get_welcome_message(),
-                "first_question": self.questions.get(OnboardingStep.START)
+                "first_question": first_question
             }
             
         except Exception as e:
@@ -190,6 +198,84 @@ class OnboardingService:
         except Exception as e:
             logger.error(f"Error checking onboarding status: {e}")
             return False
+    
+    # ==================== PERSONALIZED QUESTION GENERATION ====================
+    
+    async def generate_personalized_question(self, step: OnboardingStep, user_preferences: Dict[str, Any]) -> str:
+        """Generate personalized onboarding questions based on previous answers"""
+        try:
+            context = self.question_contexts.get(step)
+            if not context:
+                return "Please let me know when you'd like this scheduled."
+            
+            # Build context from previous answers
+            previous_answers = []
+            for key, value in user_preferences.items():
+                if key.endswith('_affirmation') or key.endswith('_planning') or key.endswith('_checkin'):
+                    previous_answers.append(f"{key}: {value}")
+            
+            previous_context = "\n".join(previous_answers) if previous_answers else "This is the first question."
+            
+            question_prompts = {
+                "morning_affirmation": f"""Generate a warm, conversational question asking when the user wants their morning affirmation. 
+                Keep it natural and friendly. Start with the emoji ⏰ and make it feel like a personal coach asking.""",
+                
+                "day_planning": f"""The user wants morning affirmations at {user_preferences.get('morning_affirmation', 'not specified yet')}. 
+                Generate a natural follow-up question asking when they'd like to plan their day. Reference their morning time and suggest a logical time after. 
+                Start with 📝 and keep it conversational.""",
+                
+                "midday_motivation": f"""The user plans their day at {user_preferences.get('day_planning', 'not specified yet')}. 
+                Generate a question asking when they'd like a midday boost. Reference their morning schedule and suggest a natural lunch-time slot. 
+                Start with ☀️ and make it personal.""",
+                
+                "evening_winddown": f"""The user gets midday motivation at {user_preferences.get('midday_affirmation', 'not specified yet')}. 
+                Generate a question asking when they'd like an evening wind-down message. Reference their day flow and suggest early evening. 
+                Start with 🌅 and keep it warm.""",
+                
+                "progress_checkin": f"""The user wants evening wind-down at {user_preferences.get('evening_affirmation', 'not specified yet')}. 
+                Generate a question asking when they'd like a progress check-in. Reference their evening time and suggest slightly later. 
+                Start with 💪 and make it encouraging.""",
+                
+                "bedtime_gratitude": f"""The user wants progress check-ins at {user_preferences.get('accountability_checkin', 'not specified yet')}. 
+                Generate a question asking about their bedtime for gratitude messages. Reference their evening schedule and suggest before sleep. 
+                Start with 🌙 and make it soothing.""",
+                
+                "weekly_reflection": f"""The user goes to bed around {user_preferences.get('evening_gratitude', 'not specified yet')}. 
+                Generate a question asking when they'd like weekly reflection. Suggest a relaxed weekend time. 
+                Start with 🗓️ and make it thoughtful."""
+            }
+            
+            prompt = f"""You are a friendly AI coach setting up a user's personalized schedule. 
+            
+            CONTEXT: {previous_context}
+            
+            TASK: {question_prompts.get(context['type'], 'Ask about scheduling preferences')}
+            
+            RULES:
+            - Keep it under 25 words
+            - Sound natural and conversational, not robotic
+            - Reference previous answers when logical
+            - Make intelligent suggestions based on their existing schedule
+            - Don't use generic examples like "e.g., 7:00 AM"
+            - Make it feel like a personal conversation
+            
+            Generate the question now:"""
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=80,
+                temperature=0.7
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            logger.error(f"Error generating personalized question: {e}")
+            # Fallback to basic question
+            return f"{context['emoji']} When would you like this scheduled?"
     
     # ==================== UTILITY METHODS ====================
     
@@ -220,8 +306,8 @@ class OnboardingService:
         if state in [OnboardingStep.START, OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING,
                      OnboardingStep.MIDDAY_AFFIRMATION, OnboardingStep.EVENING_AFFIRMATION,
                      OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
-            # Parse time using OpenAI
-            parsed_time = await self.parse_time(user_input)
+            # Parse time using OpenAI with context awareness
+            parsed_time = await self.parse_time(user_input, state)
             if parsed_time:
                 # For sleep time, calculate gratitude time (30 minutes earlier)
                 if state == OnboardingStep.SLEEP_TIME:
@@ -240,27 +326,40 @@ class OnboardingService:
     
     # ==================== PARSING METHODS ====================
     
-    async def parse_time(self, time_str: str) -> Optional[str]:
-        """Parse time string to 24-hour format using OpenAI for natural language understanding"""
+    async def parse_time(self, time_str: str, context_step: OnboardingStep = None) -> Optional[str]:
+        """Parse time string to 24-hour format using OpenAI with context awareness"""
         try:
+            # Build context for intelligent parsing
+            context_info = ""
+            if context_step:
+                if context_step == OnboardingStep.ACCOUNTABILITY_CHECKIN:
+                    context_info = "This is for bedtime/sleep, so 11 likely means 11 PM (23:00)"
+                elif context_step in [OnboardingStep.START, OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING]:
+                    context_info = "This is for morning activities, so times are likely AM"
+                elif context_step in [OnboardingStep.EVENING_AFFIRMATION, OnboardingStep.ACCOUNTABILITY_CHECKIN]:
+                    context_info = "This is for evening activities, so times are likely PM"
+                elif context_step == OnboardingStep.MIDDAY_AFFIRMATION:
+                    context_info = "This is for midday/lunch time, so likely early afternoon"
+            
             prompt = f"""
             Parse the following user input into a 24-hour time format (HH:MM).
             
             User input: "{time_str}"
+            Context: {context_info}
             
             Instructions:
-            - Extract the time from the user's natural language input
-            - Return only the time in HH:MM format (24-hour)
-            - If the time is ambiguous (like "7"), assume it's the most logical time based on context
-            - For afternoon/evening times without AM/PM, use reasonable assumptions
-            - Examples:
-              "7 am" -> "07:00"
-              "7" -> "07:00" (assume morning)
-              "Something around 9" -> "09:00"
-              "6h30" -> "06:30"
-              "Something around 1 after lunch" -> "13:00"
-              "So it at 7" -> "19:00" (assume evening)
-              "Something areoumd 11" -> "23:00" (assume night)
+            - Extract the time from natural language
+            - Return only time in HH:MM format (24-hour)
+            - Use context to make intelligent assumptions:
+              * For sleep/bedtime: "11" = 23:00 (11 PM)
+              * For morning activities: "8" = 08:00 (8 AM)  
+              * For evening activities: "7" = 19:00 (7 PM)
+              * For midday: "1" = 13:00 (1 PM)
+            - Handle natural expressions:
+              "Let's say at 8" -> "08:00"
+              "Something around 1 pm" -> "13:00"  
+              "Usually at 11" (bedtime context) -> "23:00"
+              "Sunday at 10" -> "10:00"
             
             Return only the time in HH:MM format, nothing else.
             """
