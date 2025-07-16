@@ -208,11 +208,12 @@ class OnboardingService:
             if not context:
                 return "Please let me know when you'd like this scheduled."
             
-            # Build context from previous answers
+            # Build context from previous answers - only include completed steps
             previous_answers = []
             for key, value in user_preferences.items():
                 if key.endswith('_affirmation') or key.endswith('_planning') or key.endswith('_checkin'):
-                    previous_answers.append(f"{key}: {value}")
+                    if value and value != 'null':  # Only include actual values
+                        previous_answers.append(f"{key}: {value}")
             
             previous_context = "\n".join(previous_answers) if previous_answers else "This is the first question."
             
@@ -274,8 +275,17 @@ class OnboardingService:
             
         except Exception as e:
             logger.error(f"Error generating personalized question: {e}")
-            # Fallback to basic question
-            return f"{context['emoji']} When would you like this scheduled?"
+            # Fallback to context-appropriate question
+            fallback_questions = {
+                "morning_affirmation": "⏰ What time would you like your morning affirmation?",
+                "day_planning": "📝 When would you like to plan your day?",
+                "midday_motivation": "☀️ When would you like a midday motivation boost?",
+                "evening_winddown": "🌅 What time would you like your evening wind-down message?",
+                "progress_checkin": "💪 When should I check in about your daily progress?",
+                "bedtime_gratitude": "🌙 What time do you usually go to bed?",
+                "weekly_reflection": "🗓️ Which day and time would you like your weekly reflection?"
+            }
+            return fallback_questions.get(context['type'], f"{context['emoji']} When would you like this scheduled?")
     
     # ==================== UTILITY METHODS ====================
     
@@ -332,14 +342,14 @@ class OnboardingService:
             # Build context for intelligent parsing
             context_info = ""
             if context_step:
-                if context_step == OnboardingStep.ACCOUNTABILITY_CHECKIN:
+                if context_step == OnboardingStep.SLEEP_TIME:
                     context_info = "This is for bedtime/sleep, so 11 likely means 11 PM (23:00)"
                 elif context_step in [OnboardingStep.START, OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING]:
-                    context_info = "This is for morning activities, so times are likely AM"
+                    context_info = "This is for morning activities, so times are likely AM (8 = 08:00)"
                 elif context_step in [OnboardingStep.EVENING_AFFIRMATION, OnboardingStep.ACCOUNTABILITY_CHECKIN]:
-                    context_info = "This is for evening activities, so times are likely PM"
+                    context_info = "This is for evening activities, so times are likely PM (7 = 19:00)"
                 elif context_step == OnboardingStep.MIDDAY_AFFIRMATION:
-                    context_info = "This is for midday/lunch time, so likely early afternoon"
+                    context_info = "This is for midday/lunch time, so 13 = 13:00 (1 PM), 1 = 13:00"
             
             prompt = f"""
             Parse the following user input into a 24-hour time format (HH:MM).
@@ -402,6 +412,11 @@ class OnboardingService:
               "Sunday at 11 is good" -> {{"day": "sunday", "time": "11:00"}}
               "Monday 9am" -> {{"day": "monday", "time": "09:00"}}
               "Friday evening around 7" -> {{"day": "friday", "time": "19:00"}}
+              "Sunday 11" -> {{"day": "sunday", "time": "11:00"}}
+            
+            - For weekly reflection, assume morning times (AM) unless clearly evening context
+            - Always return valid JSON with day and time fields
+            - If parsing fails, return {{"day": null, "time": null}}
             
             Return only the JSON object, nothing else.
             """
@@ -423,6 +438,10 @@ class OnboardingService:
                     data = json.loads(result.strip())
                     day = data.get('day', '').lower()
                     time_str = data.get('time', '')
+                    
+                    # Handle null values from failed parsing
+                    if not day or not time_str or day == 'null' or time_str == 'null':
+                        return None, None
                     
                     # Validate day
                     valid_days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
