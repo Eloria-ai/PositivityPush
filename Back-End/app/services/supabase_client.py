@@ -72,6 +72,71 @@ class SupabaseService:
             logger.error(f"Error updating subscription by Stripe ID: {e}")
             raise
     
+    # User Preferences Management
+    async def get_user_preferences(self, user_id: str) -> Dict[str, Any]:
+        """Get user's scheduling preferences"""
+        try:
+            result = self.client.table("subscribers").select("preferences").eq("id", user_id).execute()
+            if result.data:
+                return result.data[0].get("preferences", {})
+            return {}
+        except Exception as e:
+            logger.error(f"Error getting user preferences: {e}")
+            return {}
+    
+    async def update_user_preferences(self, user_id: str, preferences: Dict[str, Any]) -> bool:
+        """Update user's scheduling preferences"""
+        try:
+            result = self.client.table("subscribers").update({"preferences": preferences}).eq("id", user_id).execute()
+            logger.info(f"Updated preferences for user: {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating user preferences: {e}")
+            return False
+    
+    async def set_preference_value(self, user_id: str, key: str, value: Any) -> bool:
+        """Set a specific preference value for a user"""
+        try:
+            # First get current preferences
+            current_prefs = await self.get_user_preferences(user_id)
+            
+            # Update the specific key
+            current_prefs[key] = value
+            
+            # Save back to database
+            return await self.update_user_preferences(user_id, current_prefs)
+        except Exception as e:
+            logger.error(f"Error setting preference {key} for user {user_id}: {e}")
+            return False
+    
+    async def is_onboarding_completed(self, user_id: str) -> bool:
+        """Check if user has completed onboarding"""
+        try:
+            preferences = await self.get_user_preferences(user_id)
+            return preferences.get("onboarding_completed", False)
+        except Exception as e:
+            logger.error(f"Error checking onboarding status: {e}")
+            return False
+    
+    async def mark_onboarding_completed(self, user_id: str) -> bool:
+        """Mark user's onboarding as completed"""
+        return await self.set_preference_value(user_id, "onboarding_completed", True)
+    
+    async def get_users_needing_onboarding(self) -> List[Dict[str, Any]]:
+        """Get users who haven't completed onboarding yet"""
+        try:
+            result = (
+                self.client.table("subscribers")
+                .select("*")
+                .eq("status", "active")
+                .filter("preferences->>onboarding_completed", "eq", "false")
+                .execute()
+            )
+            return result.data
+        except Exception as e:
+            logger.error(f"Error getting users needing onboarding: {e}")
+            return []
+    
     # Conversation Management
     async def log_conversation(
         self, 
@@ -178,5 +243,78 @@ class SupabaseService:
             result = query.execute()
             return result.data
         except Exception as e:
-            logger.error(f"Error getting subscribers for daily messages: {e}")
+            logger.error(f"Error getting subscribers for daily message: {e}")
             return []
+    
+    async def get_subscribers_for_scheduled_message(self, message_type: str, current_time: str, timezone: str = None) -> List[Dict[str, Any]]:
+        """Get subscribers who should receive a specific message type at current time"""
+        try:
+            # Base query for active subscribers with completed onboarding
+            query = (
+                self.client.table("subscribers")
+                .select("*")
+                .eq("status", "active")
+                .filter("preferences->>onboarding_completed", "eq", "true")
+            )
+            
+            if timezone:
+                query = query.filter("preferences->>timezone", "eq", timezone)
+            
+            # Get all matching subscribers
+            result = query.execute()
+            subscribers = result.data
+            
+            # Filter by specific message time
+            filtered_subscribers = []
+            for subscriber in subscribers:
+                preferences = subscriber.get("preferences", {})
+                
+                if message_type == "weekly_reflection":
+                    # Special handling for weekly reflection (day + time)
+                    weekly_pref = preferences.get("weekly_reflection", {})
+                    if isinstance(weekly_pref, dict):
+                        scheduled_time = weekly_pref.get("time")
+                    else:
+                        scheduled_time = None
+                else:
+                    # Regular daily messages
+                    scheduled_time = preferences.get(message_type)
+                
+                # Check if current time matches scheduled time (with 5 minute window)
+                if scheduled_time and self._is_time_match(current_time, scheduled_time):
+                    filtered_subscribers.append(subscriber)
+            
+            return filtered_subscribers
+            
+        except Exception as e:
+            logger.error(f"Error getting subscribers for {message_type}: {e}")
+            return []
+    
+    def _is_time_match(self, current_time: str, scheduled_time: str, window_minutes: int = 5) -> bool:
+        """Check if current time matches scheduled time within a window"""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Parse times
+            current = datetime.strptime(current_time, "%H:%M")
+            scheduled = datetime.strptime(scheduled_time, "%H:%M")
+            
+            # Create time window
+            window = timedelta(minutes=window_minutes)
+            start_window = scheduled - window
+            end_window = scheduled + window
+            
+            # Handle day boundary crossings
+            if start_window.day != scheduled.day:
+                # Window crosses midnight backward
+                return current >= start_window or current <= end_window
+            elif end_window.day != scheduled.day:
+                # Window crosses midnight forward  
+                return current >= start_window or current <= end_window
+            else:
+                # Normal case
+                return start_window <= current <= end_window
+                
+        except Exception as e:
+            logger.error(f"Error checking time match: {e}")
+            return False

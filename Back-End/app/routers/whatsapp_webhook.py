@@ -14,6 +14,7 @@ from app.deps import get_supabase_client
 from app.services.whatsapp_service import WhatsAppService
 from app.services.ai_coach import AICoachService
 from app.services.supabase_client import SupabaseService
+from app.services.onboarding_service import OnboardingService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -267,11 +268,11 @@ async def handle_activation_message(
             }
         )
         
-        # Send welcome message and start onboarding
-        welcome_message = await ai_coach.generate_welcome_message(subscription)
-        await whatsapp_service.send_message(wa_id, welcome_message)
+        # Start onboarding process via Celery task
+        from worker.tasks.onboarding_tasks import send_onboarding_welcome_flow
+        send_onboarding_welcome_flow.delay(subscription["id"], wa_id)
         
-        logger.info(f"Successfully activated subscription for {wa_id}")
+        logger.info(f"Successfully activated subscription and started onboarding for {wa_id}")
         
     except Exception as e:
         logger.error(f"Error in activation: {e}")
@@ -301,6 +302,20 @@ async def handle_coaching_message_with_subscription(
                 wa_id,
                 "❌ No active subscription found. Please complete your payment first at https://positivity-push.vercel.app"
             )
+            return
+        
+        # Check if user is in onboarding process
+        onboarding_service = OnboardingService(supabase_service)
+        onboarding_result = await onboarding_service.process_webhook_message(
+            subscription["id"], wa_id, message_text
+        )
+        
+        # If in onboarding, enqueue response message and return
+        if onboarding_result.get("is_onboarding"):
+            response_message = onboarding_result.get("message")
+            if response_message:
+                from worker.tasks.onboarding_tasks import send_onboarding_response
+                send_onboarding_response.delay(subscription["id"], wa_id, response_message)
             return
         
         # Log conversation

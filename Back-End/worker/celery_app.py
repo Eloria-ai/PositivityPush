@@ -19,13 +19,14 @@ celery_app = Celery(
     include=[
         "worker.tasks.daily_messages",
         "worker.tasks.weekly_reports",
-        "worker.tasks.email_notifications"
+        "worker.tasks.email_notifications",
+        "worker.tasks.onboarding_tasks"
     ]
 )
 
 # Force task discovery and registration
 try:
-    from worker.tasks import daily_messages, weekly_reports, email_notifications
+    from worker.tasks import daily_messages, weekly_reports, email_notifications, onboarding_tasks
     print(f"📦 Successfully imported task modules")
 except ImportError as e:
     print(f"❌ Task import error: {e}")

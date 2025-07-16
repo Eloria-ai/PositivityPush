@@ -5,7 +5,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Subscribers table (main user data)
-CREATE TABLE subscribers (
+CREATE TABLE IF NOT EXISTS subscribers (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     
     -- Stripe Integration
@@ -31,6 +31,22 @@ CREATE TABLE subscribers (
     active_challenges JSONB DEFAULT '[]',
     timezone VARCHAR(50) DEFAULT 'UTC',
     
+    -- User Scheduling Preferences
+    preferences JSONB DEFAULT '{
+        "morning_affirmation": "07:00",
+        "day_planning": "08:00", 
+        "midday_affirmation": "12:00",
+        "evening_affirmation": "18:00",
+        "accountability_checkin": "19:00",
+        "evening_gratitude": "21:00",
+        "weekly_reflection": {
+            "day": "sunday",
+            "time": "10:00"
+        },
+        "timezone": "UTC",
+        "onboarding_completed": false
+    }',
+    
     -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     activated_at TIMESTAMP WITH TIME ZONE,
@@ -41,7 +57,7 @@ CREATE TABLE subscribers (
 );
 
 -- Conversations table (message history)
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     subscriber_id UUID REFERENCES subscribers(id) ON DELETE CASCADE,
     
@@ -59,7 +75,7 @@ CREATE TABLE conversations (
 );
 
 -- User Progress table (weekly tracking)
-CREATE TABLE user_progress (
+CREATE TABLE IF NOT EXISTS user_progress (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     subscriber_id UUID REFERENCES subscribers(id) ON DELETE CASCADE,
     
@@ -85,7 +101,7 @@ CREATE TABLE user_progress (
 );
 
 -- Scheduled Messages table (for background tasks)
-CREATE TABLE scheduled_messages (
+CREATE TABLE IF NOT EXISTS scheduled_messages (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     subscriber_id UUID REFERENCES subscribers(id) ON DELETE CASCADE,
     
@@ -106,22 +122,30 @@ CREATE TABLE scheduled_messages (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_subscribers_wa_id ON subscribers(wa_id);
-CREATE INDEX idx_subscribers_stripe_session ON subscribers(stripe_session_id);
-CREATE INDEX idx_subscribers_status ON subscribers(status);
-CREATE INDEX idx_conversations_subscriber_timestamp ON conversations(subscriber_id, timestamp DESC);
-CREATE INDEX idx_user_progress_subscriber_week ON user_progress(subscriber_id, week_start DESC);
-CREATE INDEX idx_scheduled_messages_pending ON scheduled_messages(status, scheduled_for) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_subscribers_wa_id ON subscribers(wa_id);
+CREATE INDEX IF NOT EXISTS idx_subscribers_stripe_session ON subscribers(stripe_session_id);
+CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status);
+CREATE INDEX IF NOT EXISTS idx_subscribers_preferences ON subscribers USING GIN (preferences);
+CREATE INDEX IF NOT EXISTS idx_subscribers_onboarding ON subscribers ((preferences->>'onboarding_completed'));
+CREATE INDEX IF NOT EXISTS idx_conversations_subscriber_timestamp ON conversations(subscriber_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_user_progress_subscriber_week ON user_progress(subscriber_id, week_start DESC);
+CREATE INDEX IF NOT EXISTS idx_scheduled_messages_pending ON scheduled_messages(status, scheduled_for) WHERE status = 'pending';
 
--- Updated timestamp triggers
+-- Updated timestamp triggers (with secure search path)
 CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+SET search_path = ''
+LANGUAGE plpgsql 
+SECURITY DEFINER
+AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$;
 
+-- Drop trigger if exists, then create
+DROP TRIGGER IF EXISTS update_subscribers_updated_at ON subscribers;
 CREATE TRIGGER update_subscribers_updated_at 
     BEFORE UPDATE ON subscribers 
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -132,16 +156,21 @@ ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scheduled_messages ENABLE ROW LEVEL SECURITY;
 
--- Service role can access everything (for backend)
+-- Service role can access everything (for backend) 
+-- Drop existing policies if they exist, then create
+DROP POLICY IF EXISTS "Service role can manage all data" ON subscribers;
 CREATE POLICY "Service role can manage all data" ON subscribers
     FOR ALL USING (auth.role() = 'service_role');
-    
+
+DROP POLICY IF EXISTS "Service role can manage all conversations" ON conversations;    
 CREATE POLICY "Service role can manage all conversations" ON conversations
     FOR ALL USING (auth.role() = 'service_role');
-    
+
+DROP POLICY IF EXISTS "Service role can manage all progress" ON user_progress;    
 CREATE POLICY "Service role can manage all progress" ON user_progress
     FOR ALL USING (auth.role() = 'service_role');
-    
+
+DROP POLICY IF EXISTS "Service role can manage all scheduled messages" ON scheduled_messages;    
 CREATE POLICY "Service role can manage all scheduled messages" ON scheduled_messages
     FOR ALL USING (auth.role() = 'service_role');
 
