@@ -237,35 +237,70 @@ class OnboardingService:
     # ==================== PARSING METHODS ====================
     
     def parse_time(self, time_str: str) -> Optional[str]:
-        """Parse time string to 24-hour format"""
+        """Parse time string to 24-hour format with natural language support"""
         try:
-            # Remove common words
-            time_str = re.sub(r'\b(at|around|about)\b', '', time_str).strip()
+            # Clean the input
+            time_str = time_str.lower().strip()
             
-            # Patterns for various time formats
+            # Remove common words
+            time_str = re.sub(r'\b(at|around|about|in|the)\b', '', time_str).strip()
+            
+            # Handle natural language patterns
+            natural_patterns = [
+                # Natural morning/evening expressions
+                (r'(\d{1,2})\s*(in\s+the\s+)?morning', r'\1 am'),
+                (r'(\d{1,2})\s*(in\s+the\s+)?evening', r'\1 pm'),
+                (r'(\d{1,2})\s*(in\s+the\s+)?afternoon', r'\1 pm'),
+                (r'(\d{1,2})\s*(in\s+the\s+)?night', r'\1 pm'),
+                # Handle "7 o'clock" format
+                (r'(\d{1,2})\s*o\'?clock', r'\1:00'),
+                # Handle "7 am" without colon
+                (r'(\d{1,2})\s*(am|pm)', r'\1:00 \2'),
+            ]
+            
+            for pattern, replacement in natural_patterns:
+                time_str = re.sub(pattern, replacement, time_str)
+            
+            # Enhanced patterns for various time formats
             patterns = [
                 r'(\d{1,2}):(\d{2})\s*(am|pm)',  # 7:30 AM
+                r'(\d{1,2}):(\d{1,2})\s*(am|pm)', # 7:0 AM  
+                r'(\d{1,2}):00\s*(am|pm)',       # 7:00 AM
                 r'(\d{1,2})\s*(am|pm)',          # 7 AM
                 r'(\d{1,2}):(\d{2})',            # 07:30 (24h)
                 r'(\d{1,2})\.(\d{2})',           # 7.30
                 r'(\d{1,2})h(\d{2})',            # 7h30
+                r'(\d{1,2})',                    # Just number (assume am if < 12, pm if > 12)
             ]
             
-            for pattern in patterns:
+            for i, pattern in enumerate(patterns):
                 match = re.search(pattern, time_str)
                 if match:
-                    if len(match.groups()) == 3:  # AM/PM format
+                    if len(match.groups()) >= 3:  # AM/PM format
                         hour = int(match.group(1))
                         minute = int(match.group(2)) if match.group(2) else 0
-                        period = match.group(3)
+                        period = match.group(3).lower()
                         
                         if period == 'pm' and hour != 12:
                             hour += 12
                         elif period == 'am' and hour == 12:
                             hour = 0
-                    else:  # 24-hour format
+                    elif len(match.groups()) == 2:  # 24-hour format
                         hour = int(match.group(1))
-                        minute = int(match.group(2)) if len(match.groups()) > 1 and match.group(2) else 0
+                        minute = int(match.group(2)) if match.group(2) else 0
+                    else:  # Just hour number
+                        hour = int(match.group(1))
+                        minute = 0
+                        # Smart assumption: if <= 12, could be AM or PM (default AM)
+                        # if > 12, it's 24-hour format
+                        if hour <= 12:
+                            # Default to AM for morning hours
+                            pass
+                        elif hour > 12 and hour <= 23:
+                            # It's already 24-hour
+                            pass
+                        else:
+                            return None
                     
                     if 0 <= hour <= 23 and 0 <= minute <= 59:
                         return f"{hour:02d}:{minute:02d}"
@@ -312,10 +347,11 @@ class OnboardingService:
             'CST': 'CST', 'CENTRAL': 'CST', 'CT': 'CST',
             'MST': 'MST', 'MOUNTAIN': 'MST', 'MT': 'MST',
             'PST': 'PST', 'PACIFIC': 'PST', 'PT': 'PST',
-            'UTC': 'UTC', 'GMT': 'UTC',
+            'UTC': 'UTC', 'GMT': 'UTC', 'COORDINATED UNIVERSAL TIME': 'UTC',
             'CET': 'CET', 'CENTRAL EUROPEAN': 'CET',
             'BST': 'BST', 'BRITISH': 'BST',
-            'JST': 'JST', 'JAPAN': 'JST'
+            'JST': 'JST', 'JAPAN': 'JST',
+            'AEST': 'AEST', 'AUSTRALIAN': 'AEST'
         }
         
         # Direct match
@@ -336,7 +372,8 @@ class OnboardingService:
             if city in timezone_str:
                 return zone
         
-        return 'UTC'  # Default fallback
+        # If no match found, return UTC as fallback
+        return 'UTC'
     
     def calculate_gratitude_time(self, sleep_time: str) -> str:
         """Calculate gratitude time (30 minutes before sleep)"""
