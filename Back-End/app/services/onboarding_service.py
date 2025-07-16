@@ -93,74 +93,25 @@ class OnboardingService:
     
     async def process_webhook_message(self, user_id: str, wa_id: str, message: str) -> Dict[str, Any]:
         """
-        Process incoming webhook message during onboarding
+        Process incoming webhook message during conversational onboarding
         Returns state change info for Celery task enqueuing
         """
         try:
             # Get current onboarding state
             preferences = await self.supabase.get_user_preferences(user_id)
-            current_step_str = preferences.get("onboarding_step")
+            onboarding_step = preferences.get("onboarding_step")
             
-            if not current_step_str:
+            if not onboarding_step or onboarding_step == "null":
                 return {"is_onboarding": False}
             
-            try:
-                current_step = OnboardingStep(current_step_str)
-            except ValueError:
-                logger.error(f"Invalid onboarding step: {current_step_str}")
-                return {"is_onboarding": False}
+            # Use conversational AI to handle the onboarding
+            ai_response = await self.generate_conversational_response(user_id, message, preferences)
             
-            # Process user response
-            is_valid, parsed_value = await self.process_response(current_step, message)
-            
-            if is_valid:
-                # Save the parsed value to preferences
-                preference_key = self.preference_keys.get(current_step)
-                if preference_key:
-                    await self.supabase.set_preference_value(user_id, preference_key, parsed_value)
-                
-                # Get next step
-                next_step = self.step_flow.get(current_step)
-                
-                if next_step == OnboardingStep.COMPLETED:
-                    # Complete onboarding
-                    await self.supabase.mark_onboarding_completed(user_id)
-                    await self.supabase.set_preference_value(user_id, "onboarding_step", None)
-                    
-                    return {
-                        "is_onboarding": True,
-                        "completed": True,
-                        "message": self.get_completion_message()
-                    }
-                else:
-                    # Move to next step
-                    await self.supabase.set_preference_value(user_id, "onboarding_step", next_step.value)
-                    
-                    # Get updated preferences for personalized question
-                    updated_preferences = await self.supabase.get_user_preferences(user_id)
-                    personalized_question = await self.generate_personalized_question(next_step, updated_preferences)
-                    
-                    return {
-                        "is_onboarding": True,
-                        "completed": False,
-                        "message": personalized_question
-                    }
-            else:
-                # Check if it's a confirmation response
-                if parsed_value == "CONFIRMATION":
-                    return {
-                        "is_onboarding": True,
-                        "completed": False,
-                        "message": "I need a specific time! Please tell me what time you'd prefer (like '6pm' or '18:00')."
-                    }
-                else:
-                    # Invalid response - ask for clarification
-                    clarification = self.clarifications.get(current_step, "Please try again.")
-                    return {
-                        "is_onboarding": True,
-                        "completed": False,
-                        "message": f"🤔 {clarification}"
-                    }
+            return {
+                "is_onboarding": True,
+                "completed": ai_response.get("completed", False),
+                "message": ai_response.get("message", "Let me know what works best for you!")
+            }
                 
         except Exception as e:
             logger.error(f"Error processing onboarding message: {e}")
@@ -183,14 +134,14 @@ class OnboardingService:
             # Set initial state to START step
             await self.supabase.set_preference_value(user_id, "onboarding_step", OnboardingStep.START.value)
             
-            # Generate personalized first question
-            user_preferences = await self.supabase.get_user_preferences(user_id)
-            first_question = await self.generate_personalized_question(OnboardingStep.START, user_preferences)
+            # Generate conversational welcome
+            welcome_message = self.get_welcome_message()
+            first_message = await self.generate_initial_conversation()
             
             # Return messages for Celery to send
             return {
-                "welcome_message": self.get_welcome_message(),
-                "first_question": first_question
+                "welcome_message": welcome_message,
+                "first_question": first_message
             }
             
         except Exception as e:
@@ -207,6 +158,207 @@ class OnboardingService:
             logger.error(f"Error checking onboarding status: {e}")
             return False
     
+    # ==================== CONVERSATIONAL AI ONBOARDING ====================
+    
+    async def generate_conversational_response(self, user_id: str, user_message: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate conversational AI response that naturally collects schedule preferences"""
+        try:
+            # Get conversation history for context
+            conversation_history = self.build_conversation_context(preferences)
+            
+            # Create a smart system prompt that adapts based on what we know
+            system_prompt = f"""
+            You are Maya, a warm and intelligent AI life coach for Positivity Push. You're having a natural conversation to learn about the user's daily schedule so you can send perfectly timed motivational messages.
+
+            CURRENT CONVERSATION CONTEXT:
+            {conversation_history}
+
+            YOUR MISSION:
+            Through natural conversation, learn these 7 key times:
+            1. Morning affirmation time (when they wake up/start their day)
+            2. Day planning time (when they plan their daily tasks)  
+            3. Midday motivation time (lunch/afternoon boost)
+            4. Evening wind-down time (end of work day)
+            5. Progress check-in time (evening reflection)
+            6. Bedtime/gratitude time (before sleep)
+            7. Weekly reflection time (day and time for weekly review)
+
+            CONVERSATION STYLE:
+            - Talk like a real person, not a rigid bot
+            - Ask follow-up questions about their lifestyle and work
+            - Show genuine curiosity about their routine
+            - Extract times naturally through conversation
+            - Reference what they've already shared
+            - Be encouraging and supportive
+            - Use natural transitions between topics
+
+            SMART PARSING:
+            When you get time information, store it in this format at the end of your response:
+            [EXTRACTED: morning_affirmation: 07:00]
+            [EXTRACTED: evening_affirmation: 18:00]
+            [EXTRACTED: weekly_reflection: sunday 10:00]
+
+            If you have all 7 times, end with: [ONBOARDING_COMPLETE]
+
+            EXAMPLES OF NATURAL FLOW:
+            "That's interesting! So you're up at 7 - do you jump right into work or do you have a morning routine? I'm thinking a quick motivation boost around then could be perfect..."
+
+            "Since you mentioned lunch around 12:30, how's your energy in the afternoon? Some people love a little pick-me-up around 2 or 3..."
+
+            Continue the conversation naturally based on what the user just said.
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                max_tokens=300,
+                temperature=0.8
+            )
+            
+            ai_message = response.choices[0].message.content.strip()
+            
+            # Extract any preferences from the AI's response
+            extracted_prefs = self.extract_preferences_from_response(ai_message)
+            
+            # Save extracted preferences
+            for key, value in extracted_prefs.items():
+                await self.supabase.set_preference_value(user_id, key, value)
+            
+            # Check if onboarding is complete
+            if "[ONBOARDING_COMPLETE]" in ai_message:
+                await self.supabase.mark_onboarding_completed(user_id)
+                await self.supabase.set_preference_value(user_id, "onboarding_step", None)
+                
+                # Clean up the message
+                clean_message = ai_message.replace("[ONBOARDING_COMPLETE]", "").strip()
+                clean_message += "\n\n" + self.get_completion_message()
+                
+                return {
+                    "completed": True,
+                    "message": clean_message
+                }
+            
+            # Clean up any extraction markers from the message
+            clean_message = self.clean_extraction_markers(ai_message)
+            
+            return {
+                "completed": False,
+                "message": clean_message
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating conversational response: {e}")
+            return {
+                "completed": False,
+                "message": "Tell me a bit about your daily routine - when do you usually start your day?"
+            }
+    
+    async def generate_initial_conversation(self) -> str:
+        """Generate the opening conversational message"""
+        try:
+            prompt = """
+            You're Maya, a friendly AI life coach starting a conversation to learn about someone's daily schedule. 
+            
+            Generate a warm, natural opening message that:
+            - Introduces yourself casually
+            - Explains you want to learn their routine to send perfectly timed messages
+            - Asks an open-ended question about their daily schedule
+            - Feels conversational, not robotic
+            - Is encouraging and personal
+            
+            Keep it under 50 words and make it feel like talking to a real person.
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=100,
+                temperature=0.8
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            logger.error(f"Error generating initial conversation: {e}")
+            return "Hi! I'm Maya, your AI coach. I'd love to learn about your daily routine so I can send you perfectly timed motivation. What does a typical day look like for you?"
+    
+    def build_conversation_context(self, preferences: Dict[str, Any]) -> str:
+        """Build context string of what we already know about the user"""
+        context_parts = []
+        
+        if preferences.get('morning_affirmation'):
+            context_parts.append(f"Morning time: {preferences['morning_affirmation']}")
+        if preferences.get('day_planning'):
+            context_parts.append(f"Planning time: {preferences['day_planning']}")
+        if preferences.get('midday_affirmation'):
+            context_parts.append(f"Midday time: {preferences['midday_affirmation']}")
+        if preferences.get('evening_affirmation'):
+            context_parts.append(f"Evening time: {preferences['evening_affirmation']}")
+        if preferences.get('accountability_checkin'):
+            context_parts.append(f"Check-in time: {preferences['accountability_checkin']}")
+        if preferences.get('evening_gratitude'):
+            context_parts.append(f"Bedtime: {preferences['evening_gratitude']}")
+        if preferences.get('weekly_reflection'):
+            weekly = preferences['weekly_reflection']
+            if isinstance(weekly, dict):
+                context_parts.append(f"Weekly: {weekly.get('day')} {weekly.get('time')}")
+            else:
+                context_parts.append(f"Weekly: {weekly}")
+        
+        if not context_parts:
+            return "No schedule information collected yet - this is the beginning of the conversation."
+        
+        return "Already collected: " + ", ".join(context_parts)
+    
+    def extract_preferences_from_response(self, ai_message: str) -> Dict[str, Any]:
+        """Extract time preferences from AI response markers"""
+        preferences = {}
+        
+        # Look for extraction markers
+        extraction_patterns = [
+            r'\[EXTRACTED: morning_affirmation: ([^\]]+)\]',
+            r'\[EXTRACTED: day_planning: ([^\]]+)\]',
+            r'\[EXTRACTED: midday_affirmation: ([^\]]+)\]',
+            r'\[EXTRACTED: evening_affirmation: ([^\]]+)\]',
+            r'\[EXTRACTED: accountability_checkin: ([^\]]+)\]',
+            r'\[EXTRACTED: evening_gratitude: ([^\]]+)\]',
+            r'\[EXTRACTED: weekly_reflection: ([^\]]+)\]'
+        ]
+        
+        for pattern in extraction_patterns:
+            match = re.search(pattern, ai_message)
+            if match:
+                key = pattern.split(': ')[0].split('EXTRACTED: ')[1]
+                value = match.group(1).strip()
+                
+                # Handle weekly reflection specially
+                if key == 'weekly_reflection':
+                    parts = value.split()
+                    if len(parts) >= 2:
+                        preferences[key] = {
+                            "day": parts[0].lower(),
+                            "time": parts[1]
+                        }
+                else:
+                    preferences[key] = value
+        
+        return preferences
+    
+    def clean_extraction_markers(self, message: str) -> str:
+        """Remove extraction markers from AI message"""
+        # Remove all extraction markers
+        clean_message = re.sub(r'\[EXTRACTED: [^\]]+\]', '', message)
+        clean_message = clean_message.replace('[ONBOARDING_COMPLETE]', '')
+        
+        # Clean up extra whitespace
+        clean_message = re.sub(r'\n\s*\n', '\n\n', clean_message)
+        return clean_message.strip()
+
     # ==================== PERSONALIZED QUESTION GENERATION ====================
     
     async def generate_personalized_question(self, step: OnboardingStep, user_preferences: Dict[str, Any]) -> str:
