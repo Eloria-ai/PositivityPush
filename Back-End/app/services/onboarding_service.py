@@ -9,9 +9,11 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 import re
 from enum import Enum
+import json
 
 from app.services.supabase_client import SupabaseService
 from app.services.timezone_detector import TimezoneDetector
+from app.services.openai_client import OpenAIClient
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,7 @@ class OnboardingService:
     def __init__(self, supabase_service: SupabaseService):
         self.supabase = supabase_service
         self.timezone_detector = TimezoneDetector()
+        self.openai_client = OpenAIClient()
         
         # Conversation flow mapping
         self.step_flow = {
@@ -106,7 +109,7 @@ class OnboardingService:
                 return {"is_onboarding": False}
             
             # Process user response
-            is_valid, parsed_value = self.process_response(current_step, message)
+            is_valid, parsed_value = await self.process_response(current_step, message)
             
             if is_valid:
                 # Save the parsed value to preferences
@@ -207,18 +210,16 @@ class OnboardingService:
             "✨ *Let's make every day a little brighter together!*"
         )
     
-    def process_response(self, state: OnboardingStep, user_input: str) -> Tuple[bool, Any]:
+    async def process_response(self, state: OnboardingStep, user_input: str) -> Tuple[bool, Any]:
         """
-        Process user response for the current state
+        Process user response for the current state using OpenAI for natural language understanding
         Returns: (is_valid, parsed_value)
-        """
-        user_input = user_input.strip().lower()
-        
+        """        
         if state in [OnboardingStep.START, OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING,
                      OnboardingStep.MIDDAY_AFFIRMATION, OnboardingStep.EVENING_AFFIRMATION,
                      OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
-            # Parse time
-            parsed_time = self.parse_time(user_input)
+            # Parse time using OpenAI
+            parsed_time = await self.parse_time(user_input)
             if parsed_time:
                 # For sleep time, calculate gratitude time (30 minutes earlier)
                 if state == OnboardingStep.SLEEP_TIME:
@@ -227,8 +228,8 @@ class OnboardingService:
             return False, None
             
         elif state == OnboardingStep.WEEKLY_REFLECTION:
-            # Parse day and time
-            day, time = self.parse_weekly_time(user_input)
+            # Parse day and time using OpenAI
+            day, time = await self.parse_weekly_time(user_input)
             if day and time:
                 return True, {"day": day, "time": time}
             return False, None
@@ -237,107 +238,88 @@ class OnboardingService:
     
     # ==================== PARSING METHODS ====================
     
-    def parse_time(self, time_str: str) -> Optional[str]:
-        """Parse time string to 24-hour format with natural language support"""
+    async def parse_time(self, time_str: str) -> Optional[str]:
+        """Parse time string to 24-hour format using OpenAI for natural language understanding"""
         try:
-            # Clean the input
-            time_str = time_str.lower().strip()
+            prompt = f"""
+            Parse the following user input into a 24-hour time format (HH:MM).
             
-            # Remove common words
-            time_str = re.sub(r'\b(at|around|about|in|the)\b', '', time_str).strip()
+            User input: "{time_str}"
             
-            # Handle natural language patterns
-            natural_patterns = [
-                # Natural morning/evening expressions
-                (r'(\d{1,2})\s*(in\s+the\s+)?morning', r'\1 am'),
-                (r'(\d{1,2})\s*(in\s+the\s+)?evening', r'\1 pm'),
-                (r'(\d{1,2})\s*(in\s+the\s+)?afternoon', r'\1 pm'),
-                (r'(\d{1,2})\s*(in\s+the\s+)?night', r'\1 pm'),
-                # Handle "7 o'clock" format
-                (r'(\d{1,2})\s*o\'?clock', r'\1:00'),
-                # Handle "11 am" without colon - more flexible
-                (r'(\d{1,2})\s+(am|pm)', r'\1:00 \2'),
-            ]
+            Instructions:
+            - Extract the time from the user's natural language input
+            - Return only the time in HH:MM format (24-hour)
+            - If the time is ambiguous (like "7"), assume it's the most logical time based on context
+            - For afternoon/evening times without AM/PM, use reasonable assumptions
+            - Examples:
+              "7 am" -> "07:00"
+              "7" -> "07:00" (assume morning)
+              "Something around 9" -> "09:00"
+              "6h30" -> "06:30"
+              "Something around 1 after lunch" -> "13:00"
+              "So it at 7" -> "19:00" (assume evening)
+              "Something areoumd 11" -> "23:00" (assume night)
             
-            for pattern, replacement in natural_patterns:
-                time_str = re.sub(pattern, replacement, time_str)
+            Return only the time in HH:MM format, nothing else.
+            """
             
-            # Enhanced patterns for various time formats
-            patterns = [
-                r'(\d{1,2}):(\d{2})\s*(am|pm)',  # 7:30 AM
-                r'(\d{1,2}):(\d{1,2})\s*(am|pm)', # 7:0 AM  
-                r'(\d{1,2}):00\s*(am|pm)',       # 7:00 AM
-                r'(\d{1,2})\s*(am|pm)',          # 7 AM
-                r'(\d{1,2}):(\d{2})',            # 07:30 (24h)
-                r'(\d{1,2})\.(\d{2})',           # 7.30
-                r'(\d{1,2})h(\d{2})',            # 7h30
-                r'(\d{1,2})',                    # Just number (assume am if < 12, pm if > 12)
-            ]
+            response = await self.openai_client.get_completion(prompt)
             
-            for pattern in patterns:
-                match = re.search(pattern, time_str)
-                if match:
-                    if len(match.groups()) >= 3:  # AM/PM format
-                        hour = int(match.group(1))
-                        minute = int(match.group(2)) if match.group(2) else 0
-                        period = match.group(3).lower()
-                        
-                        if period == 'pm' and hour != 12:
-                            hour += 12
-                        elif period == 'am' and hour == 12:
-                            hour = 0
-                    elif len(match.groups()) == 2:  # 24-hour format
-                        hour = int(match.group(1))
-                        minute = int(match.group(2)) if match.group(2) else 0
-                    else:  # Just hour number
-                        hour = int(match.group(1))
-                        minute = 0
-                        # Smart assumption: if <= 12, could be AM or PM (default AM)
-                        # if > 12, it's 24-hour format
-                        if hour <= 12:
-                            # Default to AM for morning hours
-                            pass
-                        elif hour > 12 and hour <= 23:
-                            # It's already 24-hour
-                            pass
-                        else:
-                            return None
-                    
-                    if 0 <= hour <= 23 and 0 <= minute <= 59:
-                        return f"{hour:02d}:{minute:02d}"
+            # Validate the response format
+            if response and re.match(r'^[0-2][0-9]:[0-5][0-9]$', response.strip()):
+                return response.strip()
             
             return None
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error parsing time with OpenAI: {e}")
             return None
     
-    def parse_weekly_time(self, message: str) -> Tuple[Optional[str], Optional[str]]:
-        """Parse weekly reflection day and time with improved natural language support"""
+    async def parse_weekly_time(self, message: str) -> Tuple[Optional[str], Optional[str]]:
+        """Parse weekly reflection day and time using OpenAI for natural language understanding"""
         try:
-            message_lower = message.lower().strip()
+            prompt = f"""
+            Parse the following user input to extract a day of the week and time for weekly reflection.
             
-            # Days mapping
-            days = {
-                'monday': 'monday', 'mon': 'monday',
-                'tuesday': 'tuesday', 'tue': 'tuesday', 'tues': 'tuesday',
-                'wednesday': 'wednesday', 'wed': 'wednesday',
-                'thursday': 'thursday', 'thu': 'thursday', 'thurs': 'thursday',
-                'friday': 'friday', 'fri': 'friday',
-                'saturday': 'saturday', 'sat': 'saturday',
-                'sunday': 'sunday', 'sun': 'sunday'
-            }
+            User input: "{message}"
             
-            # Find day with word boundary matching
-            day = None
-            for day_key, day_value in days.items():
-                if re.search(r'\b' + day_key + r'\b', message_lower):
-                    day = day_value
-                    break
+            Instructions:
+            - Extract the day of the week (convert to lowercase)
+            - Extract the time in 24-hour format (HH:MM)
+            - Return as JSON: {{"day": "dayname", "time": "HH:MM"}}
+            - Valid days: monday, tuesday, wednesday, thursday, friday, saturday, sunday
+            - If time is ambiguous, make reasonable assumptions based on context
+            - Examples:
+              "Sunday at 11 is good" -> {{"day": "sunday", "time": "11:00"}}
+              "Monday 9am" -> {{"day": "monday", "time": "09:00"}}
+              "Friday evening around 7" -> {{"day": "friday", "time": "19:00"}}
             
-            # Extract time using improved parsing
-            time_24h = self.parse_time(message_lower)
+            Return only the JSON object, nothing else.
+            """
             
-            return day, time_24h
-        except Exception:
+            response = await self.openai_client.get_completion(prompt)
+            
+            # Parse the JSON response
+            if response:
+                try:
+                    data = json.loads(response.strip())
+                    day = data.get('day', '').lower()
+                    time_str = data.get('time', '')
+                    
+                    # Validate day
+                    valid_days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+                    if day not in valid_days:
+                        return None, None
+                    
+                    # Validate time format
+                    if re.match(r'^[0-2][0-9]:[0-5][0-9]$', time_str):
+                        return day, time_str
+                    
+                except json.JSONDecodeError:
+                    logger.error(f"Invalid JSON response from OpenAI: {response}")
+            
+            return None, None
+        except Exception as e:
+            logger.error(f"Error parsing weekly time with OpenAI: {e}")
             return None, None
     
     def parse_timezone(self, timezone_str: str) -> Optional[str]:
