@@ -99,10 +99,18 @@ class OnboardingService:
         try:
             # Get current onboarding state
             preferences = await self.supabase.get_user_preferences(user_id)
+            onboarding_completed = preferences.get("onboarding_completed", True)
             onboarding_step = preferences.get("onboarding_step")
             
-            if not onboarding_step or onboarding_step == "null":
+            logger.info(f"Onboarding check for user {user_id}: completed={onboarding_completed}, step={onboarding_step}")
+            
+            # Check if user needs onboarding (default to completed=True if not explicitly set to False)
+            if onboarding_completed == True or onboarding_completed is None:
+                logger.info(f"User {user_id} has completed onboarding, skipping")
                 return {"is_onboarding": False}
+            
+            if onboarding_completed == False:
+                logger.info(f"User {user_id} needs onboarding, proceeding with conversational AI")
             
             # Use conversational AI to handle the onboarding
             ai_response = await self.generate_conversational_response(user_id, message, preferences)
