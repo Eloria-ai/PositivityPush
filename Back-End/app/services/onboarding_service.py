@@ -146,13 +146,21 @@ class OnboardingService:
                         "message": personalized_question
                     }
             else:
-                # Invalid response - ask for clarification
-                clarification = self.clarifications.get(current_step, "Please try again.")
-                return {
-                    "is_onboarding": True,
-                    "completed": False,
-                    "message": f"🤔 {clarification}"
-                }
+                # Check if it's a confirmation response
+                if parsed_value == "CONFIRMATION":
+                    return {
+                        "is_onboarding": True,
+                        "completed": False,
+                        "message": "I need a specific time! Please tell me what time you'd prefer (like '6pm' or '18:00')."
+                    }
+                else:
+                    # Invalid response - ask for clarification
+                    clarification = self.clarifications.get(current_step, "Please try again.")
+                    return {
+                        "is_onboarding": True,
+                        "completed": False,
+                        "message": f"🤔 {clarification}"
+                    }
                 
         except Exception as e:
             logger.error(f"Error processing onboarding message: {e}")
@@ -208,14 +216,16 @@ class OnboardingService:
             if not context:
                 return "Please let me know when you'd like this scheduled."
             
-            # Build context from previous answers - only include completed steps
+            # Build context from previous answers - only include actual completed steps
             previous_answers = []
-            for key, value in user_preferences.items():
-                if key.endswith('_affirmation') or key.endswith('_planning') or key.endswith('_checkin'):
-                    if value and value != 'null':  # Only include actual values
-                        previous_answers.append(f"{key}: {value}")
+            preference_keys = ['morning_affirmation', 'day_planning', 'midday_affirmation', 'evening_affirmation', 'accountability_checkin', 'evening_gratitude']
             
-            previous_context = "\n".join(previous_answers) if previous_answers else "This is the first question."
+            for key in preference_keys:
+                value = user_preferences.get(key)
+                if value and value != 'null' and value != '':  # Only include actual values
+                    previous_answers.append(f"{key}: {value}")
+            
+            previous_context = "\n".join(previous_answers) if previous_answers else "This is the first question - no previous answers yet."
             
             question_prompts = {
                 "morning_affirmation": f"""Generate a warm, conversational question asking when the user wants their morning affirmation. 
@@ -308,6 +318,15 @@ class OnboardingService:
             "✨ *Let's make every day a little brighter together!*"
         )
     
+    def is_confirmation_response(self, user_input: str) -> bool:
+        """Check if user is giving a confirmation response rather than a time"""
+        confirmation_words = [
+            "sure", "sounds good", "ok", "okay", "yes", "yeah", "yep", 
+            "that works", "perfect", "good", "fine", "that's good", 
+            "sounds great", "alright", "right"
+        ]
+        return user_input.lower().strip() in confirmation_words
+
     async def process_response(self, state: OnboardingStep, user_input: str) -> Tuple[bool, Any]:
         """
         Process user response for the current state using OpenAI for natural language understanding
@@ -316,6 +335,11 @@ class OnboardingService:
         if state in [OnboardingStep.START, OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING,
                      OnboardingStep.MIDDAY_AFFIRMATION, OnboardingStep.EVENING_AFFIRMATION,
                      OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
+            
+            # Handle confirmation responses - ask for clarification
+            if self.is_confirmation_response(user_input):
+                return False, "CONFIRMATION"
+            
             # Parse time using OpenAI with context awareness
             parsed_time = await self.parse_time(user_input, state)
             if parsed_time:
@@ -352,26 +376,28 @@ class OnboardingService:
                     context_info = "This is for midday/lunch time, so 13 = 13:00 (1 PM), 1 = 13:00"
             
             prompt = f"""
-            Parse the following user input into a 24-hour time format (HH:MM).
+            Parse this user input into EXACT 24-hour time format (HH:MM).
             
             User input: "{time_str}"
             Context: {context_info}
             
-            Instructions:
-            - Extract the time from natural language
-            - Return only time in HH:MM format (24-hour)
-            - Use context to make intelligent assumptions:
-              * For sleep/bedtime: "11" = 23:00 (11 PM)
-              * For morning activities: "8" = 08:00 (8 AM)  
-              * For evening activities: "7" = 19:00 (7 PM)
-              * For midday: "1" = 13:00 (1 PM)
-            - Handle natural expressions:
-              "Let's say at 8" -> "08:00"
-              "Something around 1 pm" -> "13:00"  
-              "Usually at 11" (bedtime context) -> "23:00"
-              "Sunday at 10" -> "10:00"
+            STRICT PARSING RULES:
+            - "6pm" = "18:00" (NOT 20:00)
+            - "6" (evening context) = "18:00" 
+            - "11" (bedtime context) = "23:00"
+            - "9 o'clock" = "09:00" (morning context)
+            - "Sounds good" = INVALID (return "INVALID")
+            - "Sure" = INVALID (return "INVALID")
             
-            Return only the time in HH:MM format, nothing else.
+            EXAMPLES:
+            - "6pm" -> "18:00"
+            - "6" (evening) -> "18:00"
+            - "11" (bedtime) -> "23:00"
+            - "9 o'clock" -> "09:00"
+            - "Sounds good" -> "INVALID"
+            - "Sure" -> "INVALID"
+            
+            Return ONLY the time in HH:MM format OR "INVALID" if not a time.
             """
             
             response = self.openai_client.chat.completions.create(
@@ -385,10 +411,15 @@ class OnboardingService:
             
             result = response.choices[0].message.content.strip()
             
+            # Handle invalid responses
+            if result == "INVALID":
+                return None
+            
             # Validate the response format
             if result and re.match(r'^[0-2][0-9]:[0-5][0-9]$', result):
                 return result
             
+            logger.warning(f"Invalid time format returned: {result} for input: {time_str}")
             return None
         except Exception as e:
             logger.error(f"Error parsing time with OpenAI: {e}")
@@ -398,27 +429,27 @@ class OnboardingService:
         """Parse weekly reflection day and time using OpenAI for natural language understanding"""
         try:
             prompt = f"""
-            Parse the following user input to extract a day of the week and time for weekly reflection.
+            Parse user input to extract day and time for weekly reflection.
             
             User input: "{message}"
             
-            Instructions:
-            - Extract the day of the week (convert to lowercase)
-            - Extract the time in 24-hour format (HH:MM)
-            - Return as JSON: {{"day": "dayname", "time": "HH:MM"}}
-            - Valid days: monday, tuesday, wednesday, thursday, friday, saturday, sunday
-            - If time is ambiguous, make reasonable assumptions based on context
-            - Examples:
-              "Sunday at 11 is good" -> {{"day": "sunday", "time": "11:00"}}
-              "Monday 9am" -> {{"day": "monday", "time": "09:00"}}
-              "Friday evening around 7" -> {{"day": "friday", "time": "19:00"}}
-              "Sunday 11" -> {{"day": "sunday", "time": "11:00"}}
+            STRICT PARSING RULES:
+            - "Sunday at 10" -> {{"day": "sunday", "time": "10:00"}}
+            - "Sunday 11" -> {{"day": "sunday", "time": "11:00"}}
+            - "Monday 9am" -> {{"day": "monday", "time": "09:00"}}
+            - "Friday evening 7" -> {{"day": "friday", "time": "19:00"}}
             
-            - For weekly reflection, assume morning times (AM) unless clearly evening context
-            - Always return valid JSON with day and time fields
-            - If parsing fails, return {{"day": null, "time": null}}
+            DEFAULT ASSUMPTIONS:
+            - Weekly reflection times are typically morning (AM) unless specified
+            - "10" means "10:00" (10 AM)
+            - "11" means "11:00" (11 AM)
             
-            Return only the JSON object, nothing else.
+            Valid days: monday, tuesday, wednesday, thursday, friday, saturday, sunday
+            
+            Return JSON: {{"day": "dayname", "time": "HH:MM"}}
+            If parsing fails: {{"day": null, "time": null}}
+            
+            Return ONLY the JSON object.
             """
             
             response = self.openai_client.chat.completions.create(
