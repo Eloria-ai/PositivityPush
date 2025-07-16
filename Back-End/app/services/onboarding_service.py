@@ -11,6 +11,7 @@ import re
 from enum import Enum
 
 from app.services.supabase_client import SupabaseService
+from app.services.timezone_detector import TimezoneDetector
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,6 @@ class OnboardingStep(Enum):
     ACCOUNTABILITY_CHECKIN = "accountability_checkin"
     SLEEP_TIME = "sleep_time"
     WEEKLY_REFLECTION = "weekly_reflection"
-    TIMEZONE = "timezone"
     COMPLETED = "completed"
 
 class OnboardingService:
@@ -35,6 +35,7 @@ class OnboardingService:
     
     def __init__(self, supabase_service: SupabaseService):
         self.supabase = supabase_service
+        self.timezone_detector = TimezoneDetector()
         
         # Conversation flow mapping
         self.step_flow = {
@@ -45,8 +46,7 @@ class OnboardingService:
             OnboardingStep.EVENING_AFFIRMATION: OnboardingStep.ACCOUNTABILITY_CHECKIN,
             OnboardingStep.ACCOUNTABILITY_CHECKIN: OnboardingStep.SLEEP_TIME,
             OnboardingStep.SLEEP_TIME: OnboardingStep.WEEKLY_REFLECTION,
-            OnboardingStep.WEEKLY_REFLECTION: OnboardingStep.TIMEZONE,
-            OnboardingStep.TIMEZONE: OnboardingStep.COMPLETED
+            OnboardingStep.WEEKLY_REFLECTION: OnboardingStep.COMPLETED
         }
         
         # Questions for each step
@@ -57,8 +57,7 @@ class OnboardingService:
             OnboardingStep.MIDDAY_AFFIRMATION: "🌅 What time would you like your **evening wind-down message**? (e.g., 6:00 PM, 7:00 PM)",
             OnboardingStep.EVENING_AFFIRMATION: "💪 When should I **check in about your daily progress**? (e.g., 7:00 PM, 8:00 PM)",
             OnboardingStep.ACCOUNTABILITY_CHECKIN: "🌙 Around what time do you usually **go to bed**? (This helps time your gratitude message, e.g., 9:00 PM, 10:30 PM)",
-            OnboardingStep.SLEEP_TIME: "🗓️ Which **day and time** would you like your weekly reflection? (e.g., Sunday 10:00 AM, Monday 9:00 AM)",
-            OnboardingStep.WEEKLY_REFLECTION: "🌍 What's your **timezone**? (e.g., EST, PST, CET, UTC, or your city)"
+            OnboardingStep.SLEEP_TIME: "🗓️ Which **day and time** would you like your weekly reflection? (e.g., Sunday 10:00 AM, Monday 9:00 AM)"
         }
         
         # Clarification messages
@@ -69,8 +68,7 @@ class OnboardingService:
             OnboardingStep.EVENING_AFFIRMATION: "Please enter a valid time like '6:00 PM' or '18:00'",
             OnboardingStep.ACCOUNTABILITY_CHECKIN: "Please enter a valid time like '7:00 PM' or '19:00'",
             OnboardingStep.SLEEP_TIME: "Please enter a valid time like '9:00 PM' or '21:30'",
-            OnboardingStep.WEEKLY_REFLECTION: "Please enter day and time like 'Sunday 10:00 AM' or 'Monday 9:00'",
-            OnboardingStep.TIMEZONE: "Please enter your timezone like 'EST', 'PST', 'UTC' or your city name"
+            OnboardingStep.WEEKLY_REFLECTION: "Please enter day and time like 'Sunday 10:00 AM' or 'Monday 9:00'"
         }
         
         # Preference keys for database storage
@@ -81,8 +79,7 @@ class OnboardingService:
             OnboardingStep.EVENING_AFFIRMATION: "evening_affirmation",
             OnboardingStep.ACCOUNTABILITY_CHECKIN: "accountability_checkin",
             OnboardingStep.SLEEP_TIME: "evening_gratitude",  # Gratitude before sleep
-            OnboardingStep.WEEKLY_REFLECTION: "weekly_reflection",
-            OnboardingStep.TIMEZONE: "timezone"
+            OnboardingStep.WEEKLY_REFLECTION: "weekly_reflection"
         }
     
     # ==================== CORE ASYNC METHODS ====================
@@ -150,11 +147,20 @@ class OnboardingService:
             logger.error(f"Error processing onboarding message: {e}")
             return {"is_onboarding": False}
     
-    async def start_onboarding(self, user_id: str) -> Dict[str, Any]:
+    async def start_onboarding(self, user_id: str, client_ip: str = None) -> Dict[str, Any]:
         """
         Start onboarding flow - returns messages to enqueue
+        Automatically detects timezone from IP address
         """
         try:
+            # Detect timezone automatically
+            if client_ip:
+                detected_timezone = self.timezone_detector.detect_timezone_from_ip(client_ip)
+                logger.info(f"Detected timezone for user {user_id}: {detected_timezone}")
+                
+                # Set timezone immediately
+                await self.supabase.set_preference_value(user_id, "timezone", detected_timezone)
+            
             # Set initial state
             await self.supabase.set_preference_value(user_id, "onboarding_step", OnboardingStep.MORNING_AFFIRMATION.value)
             
@@ -224,13 +230,6 @@ class OnboardingService:
             if day and time:
                 return True, {"day": day, "time": time}
             return False, None
-            
-        elif state == OnboardingStep.TIMEZONE:
-            # Parse timezone
-            timezone = self.parse_timezone(user_input)
-            if timezone:
-                return True, timezone
-            return False, None
         
         return False, None
     
@@ -273,7 +272,7 @@ class OnboardingService:
                 r'(\d{1,2})',                    # Just number (assume am if < 12, pm if > 12)
             ]
             
-            for i, pattern in enumerate(patterns):
+            for pattern in patterns:
                 match = re.search(pattern, time_str)
                 if match:
                     if len(match.groups()) >= 3:  # AM/PM format
