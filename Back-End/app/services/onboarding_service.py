@@ -62,6 +62,7 @@ class OnboardingService:
         
         # Clarification messages
         self.clarifications = {
+            OnboardingStep.START: "Please enter a valid time like '7:00 AM' or '7 morning'",
             OnboardingStep.MORNING_AFFIRMATION: "Please enter a valid time like '7:00 AM' or '07:30'",
             OnboardingStep.DAY_PLANNING: "Please enter a valid time like '8:00 AM' or '08:30'",
             OnboardingStep.MIDDAY_AFFIRMATION: "Please enter a valid time like '12:00 PM' or '13:00'",
@@ -73,6 +74,7 @@ class OnboardingService:
         
         # Preference keys for database storage
         self.preference_keys = {
+            OnboardingStep.START: "morning_affirmation",  # START question asks for morning time
             OnboardingStep.MORNING_AFFIRMATION: "morning_affirmation",
             OnboardingStep.DAY_PLANNING: "day_planning",
             OnboardingStep.MIDDAY_AFFIRMATION: "midday_affirmation",
@@ -161,8 +163,8 @@ class OnboardingService:
                 # Set timezone immediately
                 await self.supabase.set_preference_value(user_id, "timezone", detected_timezone)
             
-            # Set initial state
-            await self.supabase.set_preference_value(user_id, "onboarding_step", OnboardingStep.MORNING_AFFIRMATION.value)
+            # Set initial state to START step
+            await self.supabase.set_preference_value(user_id, "onboarding_step", OnboardingStep.START.value)
             
             # Return messages for Celery to send
             return {
@@ -212,7 +214,7 @@ class OnboardingService:
         """
         user_input = user_input.strip().lower()
         
-        if state in [OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING,
+        if state in [OnboardingStep.START, OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING,
                      OnboardingStep.MIDDAY_AFFIRMATION, OnboardingStep.EVENING_AFFIRMATION,
                      OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
             # Parse time
@@ -253,8 +255,8 @@ class OnboardingService:
                 (r'(\d{1,2})\s*(in\s+the\s+)?night', r'\1 pm'),
                 # Handle "7 o'clock" format
                 (r'(\d{1,2})\s*o\'?clock', r'\1:00'),
-                # Handle "7 am" without colon
-                (r'(\d{1,2})\s*(am|pm)', r'\1:00 \2'),
+                # Handle "11 am" without colon - more flexible
+                (r'(\d{1,2})\s+(am|pm)', r'\1:00 \2'),
             ]
             
             for pattern, replacement in natural_patterns:
@@ -309,8 +311,10 @@ class OnboardingService:
             return None
     
     def parse_weekly_time(self, message: str) -> Tuple[Optional[str], Optional[str]]:
-        """Parse weekly reflection day and time"""
+        """Parse weekly reflection day and time with improved natural language support"""
         try:
+            message_lower = message.lower().strip()
+            
             # Days mapping
             days = {
                 'monday': 'monday', 'mon': 'monday',
@@ -322,15 +326,15 @@ class OnboardingService:
                 'sunday': 'sunday', 'sun': 'sunday'
             }
             
-            # Find day
+            # Find day with word boundary matching
             day = None
             for day_key, day_value in days.items():
-                if day_key in message:
+                if re.search(r'\b' + day_key + r'\b', message_lower):
                     day = day_value
                     break
             
-            # Extract time
-            time_24h = self.parse_time(message)
+            # Extract time using improved parsing
+            time_24h = self.parse_time(message_lower)
             
             return day, time_24h
         except Exception:
