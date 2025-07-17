@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { QRCodeSVG } from "qrcode.react"
 import { Button } from "@/components/ui/button"
@@ -14,10 +14,43 @@ export const dynamic = 'force-dynamic'
 function SuccessPageContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("session_id")
+  const [ipStored, setIpStored] = useState(false)
   
   const whatsappNumber = process.env.NEXT_PUBLIC_WA_BUSINESS_NUMBER || "1234567890"
   const activationMessage = `POSITIVITY-PUSH START ${sessionId || "DEMO"}`
   const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(activationMessage)}`
+  
+  // Store client IP for timezone detection
+  useEffect(() => {
+    const storeClientIP = async () => {
+      if (!sessionId || ipStored) return
+      
+      try {
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+        const response = await fetch(`${backendUrl}/whatsapp/store-client-ip`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            session_id: sessionId
+          })
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          console.log('Client IP stored for timezone detection:', data.client_ip)
+          setIpStored(true)
+        } else {
+          console.warn('Failed to store client IP:', response.status)
+        }
+      } catch (error) {
+        console.error('Error storing client IP:', error)
+      }
+    }
+    
+    storeClientIP()
+  }, [sessionId, ipStored])
 
   if (!sessionId) {
     return (

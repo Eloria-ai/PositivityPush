@@ -177,53 +177,18 @@ class TimezoneService:
             logger.error(f"Error getting offset for timezone {timezone_str}: {e}")
             return "+00:00"
     
-    async def update_user_timezone_from_message(self, user_id: str, message_ip: str, supabase_service) -> Optional[str]:
-        """
-        Update user's timezone based on IP from their message
-        This handles users who are traveling
-        
-        Args:
-            user_id: User ID
-            message_ip: IP address from the message
-            supabase_service: Supabase service instance
-            
-        Returns:
-            New timezone string or None if no update needed
-        """
-        try:
-            # Get current stored timezone
-            current_subscription = await supabase_service.get_subscription_by_id(user_id)
-            current_timezone = current_subscription.get('current_timezone', 'UTC')
-            
-            # Detect timezone from current IP
-            detected_timezone = await self.detect_timezone_from_ip(message_ip)
-            
-            # Only update if timezone has changed
-            if detected_timezone and detected_timezone != current_timezone:
-                logger.info(f"Timezone change detected for user {user_id}: {current_timezone} -> {detected_timezone}")
-                
-                # Update user's current timezone
-                await supabase_service.update_subscription(
-                    user_id, 
-                    {
-                        'current_timezone': detected_timezone,
-                        'timezone_updated_at': 'now()'
-                    }
-                )
-                
-                return detected_timezone
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error updating timezone for user {user_id}: {e}")
-            return None
     
     # Phone-based timezone detection methods
     def detect_timezone_from_phone(self, message: Dict[str, Any]) -> Optional[str]:
         """
         Detect timezone from WhatsApp message metadata (phone-based)
         This is the preferred method as it's more accurate than IP detection
+        
+        LIMITATIONS:
+        - WhatsApp typically provides Unix timestamps without timezone offsets
+        - Phone metadata rarely includes explicit timezone information
+        - Success rate depends on WhatsApp API version and message format
+        - May often return None, requiring IP-based fallback
         
         Args:
             message: WhatsApp message object with timestamp and metadata
@@ -275,7 +240,6 @@ class TimezoneService:
             # Handle Unix timestamp with timezone offset
             if isinstance(timestamp, (int, float)):
                 # Convert to datetime to check if it has timezone info
-                dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
                 # For now, we can't determine timezone from UTC timestamp alone
                 return None
             
@@ -383,23 +347,37 @@ class TimezoneService:
     def _offset_to_timezone(self, offset_str: str) -> Optional[str]:
         """Convert timezone offset to timezone name"""
         try:
-            # Common offset mappings
+            # Common offset mappings - handle seasonal changes with priority
             offset_mappings = {
-                "-05:00": "America/New_York",  # EST
-                "-04:00": "America/New_York",  # EDT
-                "-06:00": "America/Chicago",   # CST
-                "-05:00": "America/Chicago",   # CDT
-                "-07:00": "America/Denver",    # MST
-                "-06:00": "America/Denver",    # MDT
-                "-08:00": "America/Los_Angeles", # PST
-                "-07:00": "America/Los_Angeles", # PDT
+                # US Eastern Time
+                "-05:00": "America/New_York",  # EST (winter)
+                "-04:00": "America/New_York",  # EDT (summer)
+                
+                # US Central Time  
+                "-06:00": "America/Chicago",   # CST (winter)
+                "-05:00": "America/Chicago",   # CDT (summer) - NOTE: conflicts with EST, EST takes priority
+                
+                # US Mountain Time
+                "-07:00": "America/Denver",    # MST (winter)
+                "-06:00": "America/Denver",    # MDT (summer) - NOTE: conflicts with CST, CST takes priority
+                
+                # US Pacific Time
+                "-08:00": "America/Los_Angeles", # PST (winter)
+                "-07:00": "America/Los_Angeles", # PDT (summer) - NOTE: conflicts with MST, MST takes priority
+                
+                # International
                 "+00:00": "UTC",
-                "+01:00": "Europe/London",     # GMT/BST
-                "+02:00": "Europe/Paris",      # CET/CEST
-                "+05:30": "Asia/Kolkata",      # IST
-                "+08:00": "Asia/Shanghai",     # CST
-                "+09:00": "Asia/Tokyo",        # JST
+                "+01:00": "Europe/London",     # GMT (winter) / BST (summer)
+                "+02:00": "Europe/Paris",      # CET (winter) / CEST (summer)
+                "+05:30": "Asia/Kolkata",      # IST (no DST)
+                "+08:00": "Asia/Shanghai",     # CST (no DST)
+                "+09:00": "Asia/Tokyo",        # JST (no DST)
             }
+            
+            # For conflicting offsets, we use the most common timezone
+            # -05:00 could be EST or CDT, but EST is more common globally
+            # -06:00 could be CST or MDT, but CST is more common
+            # -07:00 could be MST or PDT, but MST is more common
             
             return offset_mappings.get(offset_str)
             
@@ -463,6 +441,8 @@ class TimezoneService:
         try:
             # This is a placeholder for potential user agent parsing
             # In practice, user agents rarely contain timezone information
+            # Could potentially extract timezone from Accept-Language header patterns
+            # or browser timezone APIs, but this is rarely available in WhatsApp context
             return None
             
         except Exception as e:

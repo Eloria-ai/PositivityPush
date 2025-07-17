@@ -13,7 +13,6 @@ import json
 import openai
 
 from app.services.supabase_client import SupabaseService
-from app.services.timezone_detector import TimezoneDetector
 from app.services.timezone_service import TimezoneService
 from app.config import settings
 
@@ -39,7 +38,7 @@ class OnboardingService:
     
     def __init__(self, supabase_service: SupabaseService):
         self.supabase = supabase_service
-        self.timezone_detector = TimezoneDetector()
+        self.timezone_service = TimezoneService()
         self.openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = settings.OPENAI_MODEL
         
@@ -152,7 +151,7 @@ class OnboardingService:
         try:
             # Detect timezone automatically
             if client_ip:
-                detected_timezone = self.timezone_detector.detect_timezone_from_ip(client_ip)
+                detected_timezone = await self.timezone_service.detect_timezone_from_ip(client_ip)
                 logger.info(f"Detected timezone for user {user_id}: {detected_timezone}")
                 
                 # Set timezone immediately
