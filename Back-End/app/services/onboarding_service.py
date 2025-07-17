@@ -203,21 +203,24 @@ class OnboardingService:
             CRITICAL RULES:
             1. If this is "FIRST CONVERSATION" - introduce yourself as Maya
             2. If this is "ONGOING CONVERSATION" - DON'T re-introduce yourself, continue naturally
-            3. When user mentions ANY time, IMMEDIATELY extract it:
-               - "I wake up at 7" -> [EXTRACTED: morning_affirmation: 07:00]
-               - "Around 13" -> [EXTRACTED: midday_affirmation: 13:00] 
-               - "Sunday 11 am" -> [EXTRACTED: weekly_reflection: Sunday 11:00]
+            3. MANDATORY EXTRACTION: When user mentions ANY time, you MUST extract it:
+               - "I wake up at 7" -> MUST include [EXTRACTED: morning_affirmation: 07:00]
+               - "Around 13" -> MUST include [EXTRACTED: midday_affirmation: 13:00] 
+               - "Sunday 11 am" -> MUST include [EXTRACTED: weekly_reflection: Sunday 11:00]
+               - "I plan at 9" -> MUST include [EXTRACTED: day_planning: 09:00]
 
-            4. After extracting, ask for the NEXT missing item from the "Still need" list
-            5. Reference what you already know to build rapport
-            6. When you have all 7 times, add: [ONBOARDING_COMPLETE]
+            4. NEVER respond without extraction markers when times are mentioned
+            5. After extracting, ask for the NEXT missing item from the "Still need" list
+            6. Reference what you already know to build rapport
+            7. When you have all 7 times, add: [ONBOARDING_COMPLETE]
 
             EXAMPLES:
             - First time: "Hi! I'm Maya, your AI coach! What time do you wake up?"
-            - Ongoing: "Great! So you wake at 7 and plan at 9. What about your evening wind-down time?"
-            - Extract: "Perfect! [EXTRACTED: evening_affirmation: 18:00] When do you check your daily progress?"
+            - Extract wake-up: "Perfect! [EXTRACTED: morning_affirmation: 07:00] When do you usually plan your day?"
+            - Extract planning: "Great! [EXTRACTED: day_planning: 09:00] What about your midday boost time?"
+            - Extract midday: "Excellent! [EXTRACTED: midday_affirmation: 13:00] When do you wind down in the evening?"
 
-            BE CONVERSATIONAL. REFERENCE PREVIOUS ANSWERS. EXTRACT TIMES MANDATORY.
+            EXTRACTION IS MANDATORY. EVERY TIME RESPONSE MUST HAVE [EXTRACTED: key: value] MARKERS.
             """
             
             logger.error(f"🚨 CONVERSATIONAL AI - Sending to OpenAI with prompt length: {len(system_prompt)}")
@@ -320,7 +323,7 @@ class OnboardingService:
         
         for key, label in schedule_items:
             value = preferences.get(key)
-            if value and value != 'null' and value != '':
+            if value and value != 'null' and value != '' and value is not None:
                 if key == 'weekly_reflection' and isinstance(value, dict):
                     context_parts.append(f"✅ {label}: {value.get('day')} {value.get('time')}")
                 else:
@@ -328,7 +331,9 @@ class OnboardingService:
             else:
                 missing_parts.append(f"❓ {label}")
         
-        if not context_parts:
+        # Check if we have any collected data OR if this is truly the first message
+        onboarding_step = preferences.get('onboarding_step')
+        if not context_parts and onboarding_step == 'start':
             return "FIRST CONVERSATION - No schedule collected yet. Start by introducing yourself as Maya and ask about wake-up time."
         
         context = "ONGOING CONVERSATION - Already collected:\n" + "\n".join(context_parts)
