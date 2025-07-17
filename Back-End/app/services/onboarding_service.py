@@ -404,20 +404,11 @@ class OnboardingService:
             # Generate next question
             next_question = await self.get_next_question(preferences)
             
-            # Generate acknowledgment with AM/PM format
+            # Generate natural acknowledgment with AI
             formatted_time = self.format_time_ampm(value) if isinstance(value, str) else value
+            acknowledgment = await self.generate_natural_acknowledgment(key, formatted_time, next_question)
             
-            acknowledgments = {
-                'morning_affirmation': f"Great! I'll send your morning affirmation at {formatted_time}.",
-                'day_planning': f"Perfect! Daily planning at {formatted_time} it is.",
-                'midday_affirmation': f"Excellent! Midday boost at {formatted_time}.",
-                'evening_affirmation': f"Wonderful! Evening wind-down at {formatted_time}.",
-                'accountability_checkin': f"Nice! Progress check-in at {formatted_time}.",
-                'evening_gratitude': f"Perfect! Bedtime gratitude at {formatted_time}.",
-                'weekly_reflection': f"Great! Weekly reflection on {value.get('day')} at {self.format_time_ampm(value.get('time'))}." if isinstance(value, dict) else f"Great! Weekly reflection: {formatted_time}."
-            }
-            
-            message = acknowledgments.get(key, "Great!") + f"\n\n{next_question}"
+            message = acknowledgment
             
             return {
                 "completed": False,
@@ -432,31 +423,202 @@ class OnboardingService:
             }
     
     async def generate_clarifying_response(self, message: str, preferences: Dict[str, Any]) -> str:
-        """Generate clarifying question when no time is detected"""
+        """Generate natural clarifying question when no time is detected"""
         try:
             next_question = await self.get_next_question(preferences)
-            return f"I didn't catch a specific time in your message. {next_question}"
+            
+            # Generate natural clarification using AI
+            prompt = f"""
+            You're Maya, a warm AI life coach helping someone set up their daily routine.
+            
+            The user just responded with: "{message}"
+            
+            You couldn't detect a specific time in their message. You need to ask them again, but in a natural, friendly way.
+            
+            The next question you need to ask is: {next_question}
+            
+            TASK: Write a natural clarification that:
+            1. Acknowledges their response warmly
+            2. Gently asks for a specific time
+            3. Shows understanding and patience
+            
+            STYLE GUIDELINES:
+            - Sound conversational and friendly
+            - Don't sound robotic or frustrated
+            - Use varied expressions (I hear you, I understand, that makes sense, etc.)
+            - Keep it under 40 words
+            - Be encouraging and supportive
+            
+            Examples:
+            "I hear you! Could you give me a specific time though? What time do you usually wake up?"
+            "That makes sense! I just need a specific time - when do you prefer to plan your day?"
+            "I understand! What specific time works best for your evening wind-down?"
+            
+            Write a natural clarification:
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are Maya, a warm AI life coach. Generate natural, patient clarifications that feel human and understanding."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=80,
+                temperature=0.7
+            )
+            
+            clarification = response.choices[0].message.content.strip()
+            clarification = clarification.replace('"', '').replace("'", "'")
+            
+            return clarification
+            
         except Exception as e:
             logger.error(f"Error generating clarifying response: {e}")
-            return "Could you please tell me what time works best for you?"
+            
+            # Fallback to varied clarifications
+            clarifications = [
+                f"I hear you! Could you give me a specific time though? {next_question}",
+                f"That makes sense! I just need a specific time - {next_question.lower()}",
+                f"I understand! {next_question}",
+                f"Got it! What specific time works best for you?",
+                f"I see! Could you share a specific time? {next_question}"
+            ]
+            
+            import random
+            return random.choice(clarifications)
     
     async def get_next_question(self, preferences: Dict[str, Any]) -> str:
         """Get the next question to ask based on what's missing"""
-        questions = [
-            ('morning_affirmation', "What time do you usually wake up?"),
-            ('day_planning', "When do you like to plan your day?"),
-            ('midday_affirmation', "What time would you like a midday boost?"),
-            ('evening_affirmation', "When do you prefer to wind down in the evening?"),
-            ('accountability_checkin', "What time should I check in on your daily progress?"),
-            ('evening_gratitude', "What time do you usually go to bed?"),
-            ('weekly_reflection', "Which day and time would you like your weekly reflection?")
-        ]
-        
-        for key, question in questions:
-            if not preferences.get(key):
-                return question
-        
-        return "What other time preferences do you have?"
+        try:
+            # Find the next missing preference
+            questions_mapping = [
+                ('morning_affirmation', "What time do you usually wake up?"),
+                ('day_planning', "When do you like to plan your day?"),
+                ('midday_affirmation', "What time would you like a midday boost?"),
+                ('evening_affirmation', "When do you prefer to wind down in the evening?"),
+                ('accountability_checkin', "What time should I check in on your daily progress?"),
+                ('evening_gratitude', "What time do you usually go to bed?"),
+                ('weekly_reflection', "Which day and time would you like your weekly reflection?")
+            ]
+            
+            for key, default_question in questions_mapping:
+                if not preferences.get(key):
+                    # Try to generate a natural question
+                    natural_question = await self.generate_natural_question(key, default_question)
+                    return natural_question
+            
+            return "What other time preferences do you have?"
+        except Exception as e:
+            logger.error(f"Error getting next question: {e}")
+            return "What time works best for you?"
+    
+    async def generate_natural_question(self, schedule_key: str, default_question: str) -> str:
+        """Generate natural, varied questions instead of static ones"""
+        try:
+            # Activity descriptions for context
+            activity_descriptions = {
+                'morning_affirmation': 'start your day with a positive affirmation',
+                'day_planning': 'organize and plan your day',
+                'midday_affirmation': 'get an energy boost during the day',
+                'evening_affirmation': 'wind down and relax in the evening',
+                'accountability_checkin': 'check in on your daily progress',
+                'evening_gratitude': 'practice gratitude before bed',
+                'weekly_reflection': 'reflect on your week and plan ahead'
+            }
+            
+            activity = activity_descriptions.get(schedule_key, 'receive a message')
+            
+            prompt = f"""
+            You're Maya, a warm AI life coach helping someone set up their daily routine.
+            
+            You need to ask when they'd like to {activity}.
+            
+            TASK: Write a natural, conversational question that:
+            1. Sounds friendly and personal
+            2. Explains briefly what this is for
+            3. Asks for their preferred time
+            
+            STYLE GUIDELINES:
+            - Sound like a supportive friend
+            - Use varied expressions (don't always start with "What time...")
+            - Keep it under 30 words
+            - Be conversational and warm
+            
+            Examples:
+            "When do you usually start your day? I'd love to send you morning motivation then!"
+            "What time works best for planning your day? I'll help you organize your thoughts."
+            "When do you like to wind down in the evening? I can send you relaxing messages then."
+            
+            Write a natural question about when to {activity}:
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are Maya, a warm AI life coach. Generate natural, conversational questions that feel human and caring."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=60,
+                temperature=0.7
+            )
+            
+            question = response.choices[0].message.content.strip()
+            question = question.replace('"', '').replace("'", "'")
+            
+            return question
+            
+        except Exception as e:
+            logger.error(f"Error generating natural question: {e}")
+            
+            # Fallback to varied static questions
+            question_variations = {
+                'morning_affirmation': [
+                    "What time do you usually wake up?",
+                    "When do you start your day?",
+                    "What time would you like your morning inspiration?",
+                    "When should I send your daily motivation?"
+                ],
+                'day_planning': [
+                    "When do you like to plan your day?",
+                    "What time works best for organizing your schedule?",
+                    "When do you prefer to set your daily goals?",
+                    "What time should I help you plan your day?"
+                ],
+                'midday_affirmation': [
+                    "What time would you like a midday boost?",
+                    "When do you need an energy pick-me-up?",
+                    "What time works for your afternoon motivation?",
+                    "When should I send your midday inspiration?"
+                ],
+                'evening_affirmation': [
+                    "When do you prefer to wind down in the evening?",
+                    "What time do you like to relax and unwind?",
+                    "When should I send your evening relaxation message?",
+                    "What time works best for your evening wind-down?"
+                ],
+                'accountability_checkin': [
+                    "What time should I check in on your daily progress?",
+                    "When would you like your daily accountability check?",
+                    "What time works for reviewing your daily wins?",
+                    "When should I ask about your progress?"
+                ],
+                'evening_gratitude': [
+                    "What time do you usually go to bed?",
+                    "When do you like to practice gratitude before sleep?",
+                    "What time should I send your bedtime reflection?",
+                    "When do you prefer your evening gratitude practice?"
+                ],
+                'weekly_reflection': [
+                    "Which day and time would you like your weekly reflection?",
+                    "When should we review your weekly progress?",
+                    "What day and time works for your weekly check-in?",
+                    "When would you like to reflect on your week?"
+                ]
+            }
+            
+            import random
+            variations = question_variations.get(schedule_key, [default_question])
+            return random.choice(variations)
     
     async def get_next_missing_key(self, preferences: Dict[str, Any]) -> Optional[str]:
         """Get the next missing preference key"""
@@ -922,6 +1084,115 @@ class OnboardingService:
         except Exception as e:
             logger.error(f"Error parsing time with OpenAI: {e}")
             return None
+    
+    async def generate_natural_acknowledgment(self, schedule_key: str, formatted_time: str, next_question: str) -> str:
+        """Generate natural, conversational acknowledgment using AI"""
+        try:
+            # Map schedule keys to user-friendly activity descriptions
+            activity_descriptions = {
+                'morning_affirmation': 'morning affirmation',
+                'day_planning': 'daily planning session',
+                'midday_affirmation': 'midday energy boost',
+                'evening_affirmation': 'evening wind-down',
+                'accountability_checkin': 'daily progress check-in',
+                'evening_gratitude': 'bedtime gratitude practice',
+                'weekly_reflection': 'weekly reflection'
+            }
+            
+            activity = activity_descriptions.get(schedule_key, 'scheduled message')
+            
+            # Create a natural acknowledgment prompt
+            prompt = f"""
+            You're Maya, a warm and encouraging AI life coach helping someone set up their daily routine. 
+            
+            The user just told you when they want their {activity} - at {formatted_time}.
+            
+            TASK: Write a natural, conversational acknowledgment that:
+            1. Acknowledges their time choice warmly (vary your language - don't always say "Great!")
+            2. Shows you understand what this means for their day
+            3. Smoothly transitions to the next question
+            
+            STYLE GUIDELINES:
+            - Sound like a supportive friend, not a robot
+            - Use varied expressions (awesome, perfect, love it, sounds good, etc.)
+            - Add a personal touch about how this fits their routine
+            - Keep it under 50 words
+            - Be conversational and natural
+            
+            Next question to ask: {next_question}
+            
+            Examples of natural acknowledgments:
+            "Awesome! I'll send your morning motivation at 7:00 AM to help kickstart your day. What time do you usually plan your day?"
+            "Perfect! A 1:00 PM energy boost sounds ideal for that afternoon slump. When do you prefer to wind down in the evening?"
+            "Love it! Sunday at 11:00 AM is perfect for reflecting on your week. That completes your personalized schedule!"
+            
+            Write a natural acknowledgment for {activity} at {formatted_time}:
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are Maya, a warm AI life coach. Generate natural, conversational acknowledgments that feel human and personal."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=100,
+                temperature=0.8  # Higher temperature for more natural variation
+            )
+            
+            acknowledgment = response.choices[0].message.content.strip()
+            
+            # Clean up any formatting issues
+            acknowledgment = acknowledgment.replace('"', '').replace("'", "'")
+            
+            return acknowledgment
+            
+        except Exception as e:
+            logger.error(f"Error generating natural acknowledgment: {e}")
+            
+            # Fallback to varied static responses (better than single static response)
+            fallback_acknowledgments = {
+                'morning_affirmation': [
+                    f"Perfect! I'll send your morning motivation at {formatted_time}.",
+                    f"Awesome! Your day will start strong with an affirmation at {formatted_time}.",
+                    f"Love it! Morning inspiration coming your way at {formatted_time}."
+                ],
+                'day_planning': [
+                    f"Great choice! Daily planning at {formatted_time} will set you up for success.",
+                    f"Perfect timing! I'll help you organize your day at {formatted_time}.",
+                    f"Excellent! Planning at {formatted_time} will keep you on track."
+                ],
+                'midday_affirmation': [
+                    f"Perfect! A midday boost at {formatted_time} will keep your energy up.",
+                    f"Great timing! I'll send motivation at {formatted_time} to beat the afternoon slump.",
+                    f"Awesome! Your {formatted_time} energy boost will power your afternoon."
+                ],
+                'evening_affirmation': [
+                    f"Wonderful! Evening relaxation at {formatted_time} sounds perfect.",
+                    f"Great choice! I'll help you unwind at {formatted_time}.",
+                    f"Perfect! Your evening wind-down at {formatted_time} will help you relax."
+                ],
+                'accountability_checkin': [
+                    f"Excellent! I'll check in on your progress at {formatted_time}.",
+                    f"Perfect timing! Daily accountability at {formatted_time} will keep you motivated.",
+                    f"Great! Your {formatted_time} check-in will help track your wins."
+                ],
+                'evening_gratitude': [
+                    f"Perfect! Bedtime gratitude at {formatted_time} will end your day positively.",
+                    f"Wonderful! I'll help you reflect at {formatted_time} before sleep.",
+                    f"Great choice! Evening gratitude at {formatted_time} promotes better rest."
+                ],
+                'weekly_reflection': [
+                    f"Perfect! Weekly reflection at {formatted_time} will help you grow.",
+                    f"Excellent! I'll help you review your week at {formatted_time}.",
+                    f"Great timing! Weekly check-in at {formatted_time} keeps you progressing."
+                ]
+            }
+            
+            import random
+            fallback_options = fallback_acknowledgments.get(schedule_key, [f"Great! I'll send your message at {formatted_time}."])
+            acknowledgment = random.choice(fallback_options)
+            
+            return f"{acknowledgment}\n\n{next_question}"
     
     def format_time_ampm(self, time_24h: str) -> str:
         """Convert 24-hour time to AM/PM format"""
