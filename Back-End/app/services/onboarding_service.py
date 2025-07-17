@@ -216,7 +216,7 @@ class OnboardingService:
                 logger.error(f"🚨 SAVED PREFERENCE: {key} = {value}")
                 
                 # STEP 3: Generate natural response acknowledging the time
-                ai_response = await self.generate_natural_response(key, value, preferences)
+                ai_response = await self.generate_natural_response(key, value, preferences, user_id)
                 logger.error(f"🚨 NATURAL RESPONSE: {ai_response}")
                 
                 return {
@@ -239,9 +239,48 @@ class OnboardingService:
             }
     
     async def extract_time_from_message(self, message: str, preferences: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-        """Extract time and determine which schedule key it belongs to"""
+        """Extract time and determine which schedule key it belongs to with correction support"""
         try:
-            # Determine what we're asking for based on what's missing
+            # Check for explicit corrections first
+            correction_key = self.detect_correction_intent(message)
+            if correction_key:
+                logger.info(f"Detected correction intent for: {correction_key}")
+                if correction_key == 'weekly_reflection':
+                    day, time = await self.parse_weekly_time(message)
+                    if day and time:
+                        return (correction_key, {"day": day, "time": time})
+                else:
+                    parsed_time = await self.parse_time(message, self.get_context_step_for_key(correction_key))
+                    if parsed_time:
+                        return (correction_key, parsed_time)
+            
+            # Check if we're in middle of onboarding - prioritize current step
+            current_step = preferences.get('onboarding_step')
+            if current_step and current_step != 'start':
+                # Map step to preference key
+                step_to_key = {
+                    'morning_affirmation': 'morning_affirmation',
+                    'day_planning': 'day_planning',
+                    'midday_affirmation': 'midday_affirmation',
+                    'evening_affirmation': 'evening_affirmation',
+                    'accountability_checkin': 'accountability_checkin',
+                    'evening_gratitude': 'evening_gratitude',
+                    'weekly_reflection': 'weekly_reflection'
+                }
+                
+                current_key = step_to_key.get(current_step)
+                if current_key:
+                    logger.info(f"Processing response for current step: {current_step}")
+                    if current_key == 'weekly_reflection':
+                        day, time = await self.parse_weekly_time(message)
+                        if day and time:
+                            return (current_key, {"day": day, "time": time})
+                    else:
+                        parsed_time = await self.parse_time(message, self.get_context_step_for_key(current_key))
+                        if parsed_time:
+                            return (current_key, parsed_time)
+            
+            # Fallback to finding first missing item (original behavior)
             missing_items = [
                 ('morning_affirmation', 'wake up'),
                 ('day_planning', 'planning'),
@@ -271,6 +310,39 @@ class OnboardingService:
         except Exception as e:
             logger.error(f"Error extracting time from message: {e}")
             return None
+    
+    def detect_correction_intent(self, message: str) -> Optional[str]:
+        """Detect if user is trying to correct a previous time"""
+        import re
+        
+        message_lower = message.lower()
+        
+        # Keywords that indicate correction intent
+        correction_keywords = [
+            'change', 'update', 'correct', 'fix', 'modify', 'adjust',
+            'not', 'wrong', 'mistake', 'actually', 'instead',
+            'mean', 'meant', 'should be', 'set to'
+        ]
+        
+        has_correction_intent = any(keyword in message_lower for keyword in correction_keywords)
+        
+        if has_correction_intent:
+            # Look for specific schedule mentions
+            schedule_keywords = {
+                'morning_affirmation': ['morning', 'wake', 'wakeup', 'wake up', 'affirmation'],
+                'day_planning': ['planning', 'plan', 'day plan', 'schedule'],
+                'midday_affirmation': ['midday', 'lunch', 'noon', 'afternoon', 'boost'],
+                'evening_affirmation': ['evening', 'wind down', 'winddown', 'relax'],
+                'accountability_checkin': ['progress', 'check in', 'checkin', 'accountability'],
+                'evening_gratitude': ['bedtime', 'sleep', 'gratitude', 'bed'],
+                'weekly_reflection': ['weekly', 'week', 'reflection', 'review']
+            }
+            
+            for key, keywords in schedule_keywords.items():
+                if any(keyword in message_lower for keyword in keywords):
+                    return key
+        
+        return None
     
     async def clear_default_schedule_preferences(self, user_id: str):
         """Clear default schedule preferences to ensure clean onboarding"""
@@ -305,7 +377,7 @@ class OnboardingService:
         }
         return key_to_step.get(key, OnboardingStep.START)
     
-    async def generate_natural_response(self, key: str, value: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
+    async def generate_natural_response(self, key: str, value: str, preferences: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         """Generate natural response after successfully extracting time"""
         try:
             # Check if we have all required items
@@ -323,6 +395,11 @@ class OnboardingService:
                     "completed": True,
                     "message": f"Perfect! That completes your schedule. {self.get_completion_message()}"
                 }
+            
+            # Update onboarding step for next question
+            next_key = await self.get_next_missing_key(preferences)
+            if next_key:
+                await self.supabase.set_preference_value(user_id, 'onboarding_step', next_key)
             
             # Generate next question
             next_question = await self.get_next_question(preferences)
@@ -380,6 +457,24 @@ class OnboardingService:
                 return question
         
         return "What other time preferences do you have?"
+    
+    async def get_next_missing_key(self, preferences: Dict[str, Any]) -> Optional[str]:
+        """Get the next missing preference key"""
+        all_keys = [
+            'morning_affirmation',
+            'day_planning',
+            'midday_affirmation',
+            'evening_affirmation',
+            'accountability_checkin',
+            'evening_gratitude',
+            'weekly_reflection'
+        ]
+        
+        for key in all_keys:
+            if not preferences.get(key):
+                return key
+        
+        return None
     
     async def generate_initial_conversation(self) -> str:
         """Generate the opening conversational message"""
@@ -664,13 +759,17 @@ class OnboardingService:
             return None
     
     def parse_time_deterministic(self, time_str: str, context_step: OnboardingStep = None) -> Optional[str]:
-        """Deterministic regex-based time parsing"""
+        """Deterministic regex-based time parsing with sentence support"""
         import re
         
+        # Normalize the input - remove common filler words and punctuation
         message = time_str.strip().lower()
+        message = re.sub(r'\b(at|around|about|approximately|roughly|by|before|after|till|until)\b', '', message)
+        message = re.sub(r'[^\w\s:.]', '', message)  # Remove punctuation except : and .
+        message = re.sub(r'\s+', ' ', message).strip()  # Normalize whitespace
         
-        # Pattern 1: "7am", "7 am", "7pm", "7 pm"
-        match = re.match(r'(\d{1,2})\s*(am|pm)', message)
+        # Pattern 1: "7am", "7 am", "7pm", "7 pm" - anywhere in sentence
+        match = re.search(r'\b(\d{1,2})\s*(am|pm)\b', message)
         if match:
             hour = int(match.group(1))
             period = match.group(2)
@@ -684,8 +783,8 @@ class OnboardingService:
             
             return f"{hour:02d}:00"
         
-        # Pattern 2: "7:30am", "7:30 pm"
-        match = re.match(r'(\d{1,2}):(\d{2})\s*(am|pm)', message)
+        # Pattern 2: "7:30am", "7:30 pm" - anywhere in sentence
+        match = re.search(r'\b(\d{1,2}):(\d{2})\s*(am|pm)\b', message)
         if match:
             hour = int(match.group(1))
             minute = int(match.group(2))
@@ -700,8 +799,22 @@ class OnboardingService:
             
             return f"{hour:02d}:{minute:02d}"
         
-        # Pattern 3: "7:30", "13:30" (24-hour format)
-        match = re.match(r'(\d{1,2}):(\d{2})$', message)
+        # Pattern 3: "7h30", "7.30" (additional formats)
+        match = re.search(r'\b(\d{1,2})[h\.](\d{2})\b', message)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            
+            # Use context for AM/PM determination
+            if context_step in [OnboardingStep.EVENING_AFFIRMATION, OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
+                if 1 <= hour <= 11:  # Assume PM for evening context
+                    hour += 12
+            
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return f"{hour:02d}:{minute:02d}"
+        
+        # Pattern 4: "7:30", "13:30" (24-hour format) - anywhere in sentence
+        match = re.search(r'\b(\d{1,2}):(\d{2})\b', message)
         if match:
             hour = int(match.group(1))
             minute = int(match.group(2))
@@ -709,8 +822,8 @@ class OnboardingService:
             if 0 <= hour <= 23 and 0 <= minute <= 59:
                 return f"{hour:02d}:{minute:02d}"
         
-        # Pattern 4: Single number like "7", "13", "19"
-        match = re.match(r'^(\d{1,2})$', message)
+        # Pattern 5: Single number like "7", "13", "19" - anywhere in sentence
+        match = re.search(r'\b(\d{1,2})\b', message)
         if match:
             hour = int(match.group(1))
             
@@ -737,10 +850,10 @@ class OnboardingService:
             # Default to AM for ambiguous cases
             return f"{hour:02d}:00"
         
-        # Special cases
-        if message in ['noon', '12pm', '12 pm']:
+        # Special cases - anywhere in sentence
+        if re.search(r'\b(noon|12pm|12 pm)\b', message):
             return "12:00"
-        if message in ['midnight', '12am', '12 am']:
+        if re.search(r'\b(midnight|12am|12 am)\b', message):
             return "00:00"
         
         return None
