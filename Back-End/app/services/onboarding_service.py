@@ -102,8 +102,8 @@ class OnboardingService:
             onboarding_completed = preferences.get("onboarding_completed", True)
             onboarding_step = preferences.get("onboarding_step")
             
-            logger.info(f"ONBOARDING DEBUG - User {user_id}: completed={onboarding_completed} (type: {type(onboarding_completed)}), step={onboarding_step}")
-            logger.info(f"ONBOARDING DEBUG - Full preferences: {preferences}")
+            logger.error(f"🚨 ONBOARDING DEBUG - User {user_id}: completed={onboarding_completed} (type: {type(onboarding_completed)}), step={onboarding_step}")
+            logger.error(f"🚨 ONBOARDING DEBUG - Full preferences: {preferences}")
             
             # Check if user needs onboarding (default to completed=True if not explicitly set to False)
             if onboarding_completed == True or onboarding_completed is None:
