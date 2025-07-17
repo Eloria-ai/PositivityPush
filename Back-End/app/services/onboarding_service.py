@@ -172,6 +172,7 @@ class OnboardingService:
     async def generate_conversational_response(self, user_id: str, user_message: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
         """Generate conversational AI response that naturally collects schedule preferences"""
         try:
+            logger.error(f"🚨 CONVERSATIONAL AI - Starting for user {user_id} with message: {user_message}")
             # Get conversation history for context
             conversation_history = self.build_conversation_context(preferences)
             
@@ -217,6 +218,8 @@ class OnboardingService:
             Continue the conversation naturally based on what the user just said.
             """
             
+            logger.error(f"🚨 CONVERSATIONAL AI - Sending to OpenAI with prompt length: {len(system_prompt)}")
+            
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -228,6 +231,7 @@ class OnboardingService:
             )
             
             ai_message = response.choices[0].message.content.strip()
+            logger.error(f"🚨 CONVERSATIONAL AI - OpenAI response: {ai_message}")
             
             # Extract any preferences from the AI's response
             extracted_prefs = self.extract_preferences_from_response(ai_message)
@@ -259,7 +263,7 @@ class OnboardingService:
             }
             
         except Exception as e:
-            logger.error(f"Error generating conversational response: {e}")
+            logger.error(f"🚨 CONVERSATIONAL AI ERROR: {e}")
             return {
                 "completed": False,
                 "message": "Tell me a bit about your daily routine - when do you usually start your day?"
