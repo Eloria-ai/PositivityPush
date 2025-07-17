@@ -110,6 +110,20 @@ class OnboardingService:
                 logger.info(f"User {user_id} has completed onboarding, skipping")
                 return {"is_onboarding": False}
             
+            # Reset onboarding for testing if user says "reset" or "restart"
+            if message.lower().strip() in ["reset", "restart", "start over"]:
+                logger.info(f"Resetting onboarding for user {user_id}")
+                await self.supabase.set_preference_value(user_id, "onboarding_completed", False)
+                await self.supabase.set_preference_value(user_id, "onboarding_step", "start")
+                # Clear existing preferences
+                await self.supabase.set_preference_value(user_id, "morning_affirmation", None)
+                await self.supabase.set_preference_value(user_id, "day_planning", None)
+                await self.supabase.set_preference_value(user_id, "midday_affirmation", None)
+                await self.supabase.set_preference_value(user_id, "evening_affirmation", None)
+                await self.supabase.set_preference_value(user_id, "accountability_checkin", None)
+                await self.supabase.set_preference_value(user_id, "evening_gratitude", None)
+                await self.supabase.set_preference_value(user_id, "weekly_reflection", None)
+            
             if onboarding_completed == False:
                 logger.info(f"User {user_id} needs onboarding, proceeding with conversational AI")
             
@@ -178,7 +192,7 @@ class OnboardingService:
             
             # Create a simplified, more forceful system prompt
             system_prompt = f"""
-            CRITICAL: You MUST be Maya, an AI life coach. Do NOT give generic responses.
+            CRITICAL: You MUST be Maya, an AI life coach. EXTRACT TIMES FROM USER RESPONSES.
 
             IDENTITY: You are Maya, a warm AI coach for Positivity Push. Your job is to learn the user's daily schedule through natural conversation.
 
@@ -187,21 +201,23 @@ class OnboardingService:
             REQUIRED BEHAVIOR:
             1. ALWAYS introduce yourself as Maya if this is the first message
             2. Ask about their daily routine to learn 7 key times:
-               - Morning wake-up time
-               - Day planning time  
-               - Midday boost time
-               - Evening wind-down time
-               - Progress check-in time
-               - Bedtime/gratitude time
-               - Weekly reflection day+time
+               - Morning wake-up time (morning_affirmation)
+               - Day planning time (day_planning)
+               - Midday boost time (midday_affirmation)
+               - Evening wind-down time (evening_affirmation)
+               - Progress check-in time (accountability_checkin)
+               - Bedtime/gratitude time (evening_gratitude)
+               - Weekly reflection day+time (weekly_reflection)
 
-            3. Be conversational and natural - ask follow-up questions about their lifestyle
-            4. When you learn times, add at the end: [EXTRACTED: morning_affirmation: 07:00]
+            3. CRITICAL: When user mentions ANY time, IMMEDIATELY extract it:
+               - "I wake up at 7" -> [EXTRACTED: morning_affirmation: 07:00]
+               - "I plan at 9" -> [EXTRACTED: day_planning: 09:00]
+               - "Sunday 11 am" -> [EXTRACTED: weekly_reflection: Sunday 11:00]
+
+            4. After extracting, ask for the NEXT missing time
             5. When you have all 7 times, add: [ONBOARDING_COMPLETE]
 
-            FIRST MESSAGE EXAMPLE: "Hi! I'm Maya, your AI coach! I'd love to learn about your daily routine so I can send you perfectly timed motivation. What time do you usually start your day?"
-
-            BE MAYA. ASK ABOUT THEIR SCHEDULE. DO NOT BE GENERIC.
+            EXTRACTION IS MANDATORY - DO NOT CONTINUE WITHOUT EXTRACTING TIMES.
             """
             
             logger.error(f"🚨 CONVERSATIONAL AI - Sending to OpenAI with prompt length: {len(system_prompt)}")
@@ -318,21 +334,20 @@ class OnboardingService:
         """Extract time preferences from AI response markers"""
         preferences = {}
         
-        # Look for extraction markers
+        # Look for extraction markers - more flexible patterns
         extraction_patterns = [
-            r'\[EXTRACTED: morning_affirmation: ([^\]]+)\]',
-            r'\[EXTRACTED: day_planning: ([^\]]+)\]',
-            r'\[EXTRACTED: midday_affirmation: ([^\]]+)\]',
-            r'\[EXTRACTED: evening_affirmation: ([^\]]+)\]',
-            r'\[EXTRACTED: accountability_checkin: ([^\]]+)\]',
-            r'\[EXTRACTED: evening_gratitude: ([^\]]+)\]',
-            r'\[EXTRACTED: weekly_reflection: ([^\]]+)\]'
+            (r'\[EXTRACTED: morning_affirmation: ([^\]]+)\]', 'morning_affirmation'),
+            (r'\[EXTRACTED: day_planning: ([^\]]+)\]', 'day_planning'),
+            (r'\[EXTRACTED: midday_affirmation: ([^\]]+)\]', 'midday_affirmation'),
+            (r'\[EXTRACTED: evening_affirmation: ([^\]]+)\]', 'evening_affirmation'),
+            (r'\[EXTRACTED: accountability_checkin: ([^\]]+)\]', 'accountability_checkin'),
+            (r'\[EXTRACTED: evening_gratitude: ([^\]]+)\]', 'evening_gratitude'),
+            (r'\[EXTRACTED: weekly_reflection: ([^\]]+)\]', 'weekly_reflection')
         ]
         
-        for pattern in extraction_patterns:
+        for pattern, key in extraction_patterns:
             match = re.search(pattern, ai_message)
             if match:
-                key = pattern.split(': ')[0].split('EXTRACTED: ')[1]
                 value = match.group(1).strip()
                 
                 # Handle weekly reflection specially
