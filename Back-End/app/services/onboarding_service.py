@@ -192,35 +192,35 @@ class OnboardingService:
             logger.error(f"🚨 CONVERSATIONAL AI - Starting for user {user_id} with message: {user_message}")
             # Get conversation history for context
             conversation_history = self.build_conversation_context(preferences)
+            logger.error(f"🚨 CONVERSATION CONTEXT: {conversation_history}")
             
-            # Create a context-aware system prompt
+            # Create a context-aware system prompt with forced extraction
             system_prompt = f"""
-            You are Maya, a warm AI life coach for Positivity Push. Your job is to learn the user's daily schedule through natural conversation.
+            You are Maya, an AI life coach. Your ONLY job is to extract times from user messages.
 
             CONVERSATION STATUS:
             {conversation_history}
 
-            CRITICAL RULES:
-            1. If this is "FIRST CONVERSATION" - introduce yourself as Maya
-            2. If this is "ONGOING CONVERSATION" - DON'T re-introduce yourself, continue naturally
-            3. MANDATORY EXTRACTION: When user mentions ANY time, you MUST extract it:
-               - "I wake up at 7" -> MUST include [EXTRACTED: morning_affirmation: 07:00]
-               - "Around 13" -> MUST include [EXTRACTED: midday_affirmation: 13:00] 
-               - "Sunday 11 am" -> MUST include [EXTRACTED: weekly_reflection: Sunday 11:00]
-               - "I plan at 9" -> MUST include [EXTRACTED: day_planning: 09:00]
+            CRITICAL EXTRACTION RULES:
+            1. If context says "FIRST CONVERSATION" - introduce yourself as Maya
+            2. If context says "ONGOING CONVERSATION" - DON'T re-introduce yourself
+            3. MANDATORY: When user mentions ANY time, format your response EXACTLY like this:
+               
+               User: "I wake up at 7"
+               Response: "Perfect! [EXTRACTED: morning_affirmation: 07:00] When do you usually plan your day?"
+               
+               User: "At 8" 
+               Response: "Great! [EXTRACTED: day_planning: 08:00] What about your midday boost time?"
+               
+               User: "Around 13"
+               Response: "Excellent! [EXTRACTED: midday_affirmation: 13:00] When do you wind down in the evening?"
 
-            4. NEVER respond without extraction markers when times are mentioned
-            5. After extracting, ask for the NEXT missing item from the "Still need" list
-            6. Reference what you already know to build rapport
+            4. NEVER respond without [EXTRACTED: key: value] when times are mentioned
+            5. The extraction marker is MANDATORY - your response will be rejected without it
+            6. After extracting, ask for the NEXT missing item from the "Still need" list
             7. When you have all 7 times, add: [ONBOARDING_COMPLETE]
 
-            EXAMPLES:
-            - First time: "Hi! I'm Maya, your AI coach! What time do you wake up?"
-            - Extract wake-up: "Perfect! [EXTRACTED: morning_affirmation: 07:00] When do you usually plan your day?"
-            - Extract planning: "Great! [EXTRACTED: day_planning: 09:00] What about your midday boost time?"
-            - Extract midday: "Excellent! [EXTRACTED: midday_affirmation: 13:00] When do you wind down in the evening?"
-
-            EXTRACTION IS MANDATORY. EVERY TIME RESPONSE MUST HAVE [EXTRACTED: key: value] MARKERS.
+            FOLLOW THE EXACT FORMAT ABOVE. NO EXCEPTIONS.
             """
             
             logger.error(f"🚨 CONVERSATIONAL AI - Sending to OpenAI with prompt length: {len(system_prompt)}")
