@@ -193,34 +193,31 @@ class OnboardingService:
             # Get conversation history for context
             conversation_history = self.build_conversation_context(preferences)
             
-            # Create a simplified, more forceful system prompt
+            # Create a context-aware system prompt
             system_prompt = f"""
-            CRITICAL: You MUST be Maya, an AI life coach. EXTRACT TIMES FROM USER RESPONSES.
+            You are Maya, a warm AI life coach for Positivity Push. Your job is to learn the user's daily schedule through natural conversation.
 
-            IDENTITY: You are Maya, a warm AI coach for Positivity Push. Your job is to learn the user's daily schedule through natural conversation.
+            CONVERSATION STATUS:
+            {conversation_history}
 
-            CONTEXT: {conversation_history}
-
-            REQUIRED BEHAVIOR:
-            1. ALWAYS introduce yourself as Maya if this is the first message
-            2. Ask about their daily routine to learn 7 key times:
-               - Morning wake-up time (morning_affirmation)
-               - Day planning time (day_planning)
-               - Midday boost time (midday_affirmation)
-               - Evening wind-down time (evening_affirmation)
-               - Progress check-in time (accountability_checkin)
-               - Bedtime/gratitude time (evening_gratitude)
-               - Weekly reflection day+time (weekly_reflection)
-
-            3. CRITICAL: When user mentions ANY time, IMMEDIATELY extract it:
+            CRITICAL RULES:
+            1. If this is "FIRST CONVERSATION" - introduce yourself as Maya
+            2. If this is "ONGOING CONVERSATION" - DON'T re-introduce yourself, continue naturally
+            3. When user mentions ANY time, IMMEDIATELY extract it:
                - "I wake up at 7" -> [EXTRACTED: morning_affirmation: 07:00]
-               - "I plan at 9" -> [EXTRACTED: day_planning: 09:00]
+               - "Around 13" -> [EXTRACTED: midday_affirmation: 13:00] 
                - "Sunday 11 am" -> [EXTRACTED: weekly_reflection: Sunday 11:00]
 
-            4. After extracting, ask for the NEXT missing time
-            5. When you have all 7 times, add: [ONBOARDING_COMPLETE]
+            4. After extracting, ask for the NEXT missing item from the "Still need" list
+            5. Reference what you already know to build rapport
+            6. When you have all 7 times, add: [ONBOARDING_COMPLETE]
 
-            EXTRACTION IS MANDATORY - DO NOT CONTINUE WITHOUT EXTRACTING TIMES.
+            EXAMPLES:
+            - First time: "Hi! I'm Maya, your AI coach! What time do you wake up?"
+            - Ongoing: "Great! So you wake at 7 and plan at 9. What about your evening wind-down time?"
+            - Extract: "Perfect! [EXTRACTED: evening_affirmation: 18:00] When do you check your daily progress?"
+
+            BE CONVERSATIONAL. REFERENCE PREVIOUS ANSWERS. EXTRACT TIMES MANDATORY.
             """
             
             logger.error(f"🚨 CONVERSATIONAL AI - Sending to OpenAI with prompt length: {len(system_prompt)}")
@@ -308,30 +305,38 @@ class OnboardingService:
     def build_conversation_context(self, preferences: Dict[str, Any]) -> str:
         """Build context string of what we already know about the user"""
         context_parts = []
+        missing_parts = []
         
-        if preferences.get('morning_affirmation'):
-            context_parts.append(f"Morning time: {preferences['morning_affirmation']}")
-        if preferences.get('day_planning'):
-            context_parts.append(f"Planning time: {preferences['day_planning']}")
-        if preferences.get('midday_affirmation'):
-            context_parts.append(f"Midday time: {preferences['midday_affirmation']}")
-        if preferences.get('evening_affirmation'):
-            context_parts.append(f"Evening time: {preferences['evening_affirmation']}")
-        if preferences.get('accountability_checkin'):
-            context_parts.append(f"Check-in time: {preferences['accountability_checkin']}")
-        if preferences.get('evening_gratitude'):
-            context_parts.append(f"Bedtime: {preferences['evening_gratitude']}")
-        if preferences.get('weekly_reflection'):
-            weekly = preferences['weekly_reflection']
-            if isinstance(weekly, dict):
-                context_parts.append(f"Weekly: {weekly.get('day')} {weekly.get('time')}")
+        # Track what we have and what we need
+        schedule_items = [
+            ('morning_affirmation', 'Morning wake-up'),
+            ('day_planning', 'Day planning'), 
+            ('midday_affirmation', 'Midday boost'),
+            ('evening_affirmation', 'Evening wind-down'),
+            ('accountability_checkin', 'Progress check-in'),
+            ('evening_gratitude', 'Bedtime/gratitude'),
+            ('weekly_reflection', 'Weekly reflection')
+        ]
+        
+        for key, label in schedule_items:
+            value = preferences.get(key)
+            if value and value != 'null' and value != '':
+                if key == 'weekly_reflection' and isinstance(value, dict):
+                    context_parts.append(f"✅ {label}: {value.get('day')} {value.get('time')}")
+                else:
+                    context_parts.append(f"✅ {label}: {value}")
             else:
-                context_parts.append(f"Weekly: {weekly}")
+                missing_parts.append(f"❓ {label}")
         
         if not context_parts:
-            return "No schedule information collected yet - this is the beginning of the conversation."
+            return "FIRST CONVERSATION - No schedule collected yet. Start by introducing yourself as Maya and ask about wake-up time."
         
-        return "Already collected: " + ", ".join(context_parts)
+        context = "ONGOING CONVERSATION - Already collected:\n" + "\n".join(context_parts)
+        if missing_parts:
+            context += f"\n\nStill need:\n" + "\n".join(missing_parts)
+            context += f"\n\nNEXT: Ask for the first missing item above. DON'T re-introduce yourself."
+        
+        return context
     
     def extract_preferences_from_response(self, ai_message: str) -> Dict[str, Any]:
         """Extract time preferences from AI response markers"""
