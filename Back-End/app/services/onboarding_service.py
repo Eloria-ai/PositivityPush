@@ -587,6 +587,7 @@ class OnboardingService:
             STRICT PARSING RULES:
             - "Sunday at 10" -> {{"day": "sunday", "time": "10:00"}}
             - "Sunday 11" -> {{"day": "sunday", "time": "11:00"}}
+            - "Sunday 11 am" -> {{"day": "sunday", "time": "11:00"}}
             - "Monday 9am" -> {{"day": "monday", "time": "09:00"}}
             - "Friday evening 7" -> {{"day": "friday", "time": "19:00"}}
             
@@ -594,6 +595,8 @@ class OnboardingService:
             - Weekly reflection times are typically morning (AM) unless specified
             - "10" means "10:00" (10 AM)
             - "11" means "11:00" (11 AM)
+            - "11 am" means "11:00" (11 AM)
+            - Handle natural language like "Sunday at 11 am" or "Sunday 11 am"
             
             Valid days: monday, tuesday, wednesday, thursday, friday, saturday, sunday
             
