@@ -15,6 +15,7 @@ from app.services.whatsapp_service import WhatsAppService
 from app.services.ai_coach import AICoachService
 from app.services.supabase_client import SupabaseService
 from app.services.onboarding_service import OnboardingService
+from app.services.timezone_service import TimezoneService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -143,6 +144,16 @@ async def process_whatsapp_business_message(
                 message_text = message.get("text", {}).get("body", "")
                 message_id = message["id"]
                 
+                # Extract additional metadata for timezone detection
+                message_timestamp = message.get("timestamp")
+                message_metadata = {
+                    "timestamp": message_timestamp,
+                    "type": message.get("type"),
+                    "id": message_id,
+                    "from": wa_id,
+                    "full_message": message  # Store full message for timezone detection
+                }
+                
                 logger.info(f"Processing WhatsApp Business message from {wa_id}: {message_text}")
                 
                 # Look up subscription
@@ -157,7 +168,8 @@ async def process_whatsapp_business_message(
                 else:
                     # Handle regular coaching conversation
                     await handle_coaching_message_with_subscription(
-                        wa_id, message_text, message_id, subscription, supabase_service, whatsapp_service, ai_coach
+                        wa_id, message_text, message_id, subscription, supabase_service, whatsapp_service, ai_coach, 
+                        client_ip=None, message_metadata=message_metadata
                     )
 
 async def process_message(
@@ -213,7 +225,7 @@ async def process_twilio_message(
     else:
         # Handle regular coaching conversation - pass the subscription we already found
         await handle_coaching_message_with_subscription(
-            from_number, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach
+            from_number, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach, client_ip=None, message_metadata=None
         )
 
 async def handle_activation_message(
@@ -269,10 +281,14 @@ async def handle_activation_message(
         )
         
         # Start onboarding process via Celery task with client IP for timezone detection
-        # Note: For WhatsApp webhook, we don't have direct access to user's IP
-        # The IP we get is from Twilio/Meta servers, not user's actual IP
-        client_ip = None  # Will fallback to UTC timezone detection
-        logger.info(f"Starting onboarding with timezone detection")
+        # Try to get stored client IP from the subscription activation
+        stored_client_ip = subscription.get("client_ip")
+        client_ip = stored_client_ip if stored_client_ip else None
+        
+        if client_ip:
+            logger.info(f"Using stored client IP for timezone detection: {client_ip}")
+        else:
+            logger.info(f"No client IP available - will fallback to UTC timezone detection")
         
         from worker.tasks.onboarding_tasks import send_onboarding_welcome_flow
         send_onboarding_welcome_flow.delay(subscription["id"], wa_id, client_ip)
@@ -293,7 +309,9 @@ async def handle_coaching_message_with_subscription(
     subscription: dict,
     supabase_service: SupabaseService,
     whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService
+    ai_coach: AICoachService,
+    client_ip: str = None,
+    message_metadata: dict = None
 ):
     """
     Handle regular coaching conversation messages with pre-fetched subscription
@@ -307,6 +325,62 @@ async def handle_coaching_message_with_subscription(
                 wa_id,
                 "❌ No active subscription found. Please complete your payment first at https://positivity-push.vercel.app"
             )
+            return
+        
+        # Check for timezone changes (for traveling users) - prefer phone-based detection
+        timezone_service = TimezoneService()
+        
+        # Create message object for timezone detection (include all available metadata)
+        message_for_tz = {
+            "timestamp": message_metadata.get("timestamp") if message_metadata else message_id,
+            "client_ip": client_ip,
+            "wa_id": wa_id,
+            "text": message_text,
+            "metadata": message_metadata or {},
+            "context": {},
+            "full_message": message_metadata.get("full_message") if message_metadata else {}
+        }
+        
+        new_timezone = await timezone_service.update_user_timezone_from_message(
+            subscription["id"], message_for_tz, supabase_service
+        )
+        if new_timezone:
+            logger.info(f"Updated timezone for user {subscription['id']} to {new_timezone}")
+            # Optionally notify user of timezone change
+            await whatsapp_service.send_message(
+                wa_id,
+                f"🌍 I noticed you might be in a different timezone now. I've updated your schedule to {new_timezone}. "
+                f"Your messages will now be sent at the right times for your current location!"
+            )
+        
+        # Check for timezone update command
+        if message_text.lower().strip() in ["update timezone", "timezone", "change timezone", "fix timezone"]:
+            timezone_service = TimezoneService()
+            if client_ip:
+                new_timezone = await timezone_service.detect_timezone_from_ip(client_ip)
+                if new_timezone:
+                    await supabase_service.update_subscription(
+                        subscription["id"], 
+                        {
+                            'current_timezone': new_timezone,
+                            'timezone_updated_at': 'now()'
+                        }
+                    )
+                    await whatsapp_service.send_message(
+                        wa_id,
+                        f"🌍 Perfect! I've updated your timezone to {new_timezone}. "
+                        f"Your scheduled messages will now be sent at the right times for your current location!"
+                    )
+                else:
+                    await whatsapp_service.send_message(
+                        wa_id,
+                        "❌ I couldn't detect your timezone. Please try again or contact support."
+                    )
+            else:
+                await whatsapp_service.send_message(
+                    wa_id,
+                    "❌ I need your location data to update your timezone. Please try again."
+                )
             return
         
         # Check if user is in onboarding process
@@ -427,6 +501,57 @@ async def handle_coaching_message(
         await whatsapp_service.send_message(
             wa_id,
             "❌ I'm having trouble right now. Please try again in a moment."
+        )
+
+@router.post("/store-client-ip")
+async def store_client_ip(
+    request: Request,
+    db = Depends(get_supabase_client)
+):
+    """
+    Store client IP address for timezone detection
+    Called by frontend before user activates WhatsApp
+    """
+    try:
+        # Get request data
+        data = await request.json()
+        session_id = data.get("session_id")
+        
+        if not session_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="session_id is required"
+            )
+        
+        # Get real client IP from headers
+        client_ip = request.headers.get("cf-connecting-ip") or \
+                   request.headers.get("x-forwarded-for", "").split(",")[0].strip() or \
+                   request.headers.get("x-real-ip") or \
+                   request.client.host
+        
+        logger.info(f"Storing client IP {client_ip} for session {session_id}")
+        
+        # Initialize database service
+        supabase_service = SupabaseService(db)
+        
+        # Update subscription with client IP
+        subscription = await supabase_service.get_subscription_by_session(session_id)
+        if subscription:
+            await supabase_service.update_subscription(
+                subscription["id"], 
+                {"client_ip": client_ip}
+            )
+            logger.info(f"Successfully stored client IP for session {session_id}")
+            return {"status": "success", "client_ip": client_ip}
+        else:
+            logger.warning(f"No subscription found for session {session_id}")
+            return {"status": "error", "message": "Session not found"}
+        
+    except Exception as e:
+        logger.error(f"Error storing client IP: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to store client IP"
         )
 
 @router.get("/health")

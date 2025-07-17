@@ -14,6 +14,7 @@ import openai
 
 from app.services.supabase_client import SupabaseService
 from app.services.timezone_detector import TimezoneDetector
+from app.services.timezone_service import TimezoneService
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -393,7 +394,7 @@ class OnboardingService:
             if completed_count >= 7:
                 return {
                     "completed": True,
-                    "message": f"Perfect! That completes your schedule. {self.get_completion_message()}"
+                    "message": self.get_completion_message()
                 }
             
             # Update onboarding step for next question

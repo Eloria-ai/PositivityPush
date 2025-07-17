@@ -44,6 +44,15 @@ class SupabaseService:
             logger.error(f"Error getting subscription by WhatsApp ID: {e}")
             return None
     
+    async def get_subscription_by_id(self, subscription_id: str) -> Optional[Dict[str, Any]]:
+        """Get subscription by ID"""
+        try:
+            result = self.client.table("subscribers").select("*").eq("id", subscription_id).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting subscription by id {subscription_id}: {e}")
+            return None
+    
     async def update_subscription(self, subscription_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update subscription record"""
         try:
