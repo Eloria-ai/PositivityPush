@@ -157,6 +157,9 @@ class OnboardingService:
                 # Set timezone immediately
                 await self.supabase.set_preference_value(user_id, "timezone", detected_timezone)
             
+            # Clear default schedule preferences to ensure clean onboarding
+            await self.clear_default_schedule_preferences(user_id)
+            
             # Set initial state to START step
             await self.supabase.set_preference_value(user_id, "onboarding_step", OnboardingStep.START.value)
             
@@ -164,10 +167,17 @@ class OnboardingService:
             welcome_message = self.get_welcome_message()
             first_message = await self.generate_initial_conversation()
             
-            # Return messages for Celery to send
+            # Return messages array for Celery to send
+            messages = []
+            if welcome_message:
+                messages.append(welcome_message)
+            if first_message:
+                messages.append(first_message)
+                
             return {
-                "welcome_message": welcome_message,
-                "first_question": first_message
+                "messages": messages,
+                "welcome_message": welcome_message,  # Keep for backwards compatibility
+                "first_question": first_message    # Keep for backwards compatibility
             }
             
         except Exception as e:
@@ -262,6 +272,26 @@ class OnboardingService:
             logger.error(f"Error extracting time from message: {e}")
             return None
     
+    async def clear_default_schedule_preferences(self, user_id: str):
+        """Clear default schedule preferences to ensure clean onboarding"""
+        try:
+            schedule_keys = [
+                'morning_affirmation',
+                'day_planning', 
+                'midday_affirmation',
+                'evening_affirmation',
+                'accountability_checkin',
+                'evening_gratitude',
+                'weekly_reflection'
+            ]
+            
+            for key in schedule_keys:
+                await self.supabase.set_preference_value(user_id, key, None)
+            
+            logger.info(f"Cleared default schedule preferences for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error clearing default preferences: {e}")
+    
     def get_context_step_for_key(self, key: str) -> OnboardingStep:
         """Map preference key to OnboardingStep for context-aware parsing"""
         key_to_step = {
@@ -297,15 +327,17 @@ class OnboardingService:
             # Generate next question
             next_question = await self.get_next_question(preferences)
             
-            # Generate acknowledgment
+            # Generate acknowledgment with AM/PM format
+            formatted_time = self.format_time_ampm(value) if isinstance(value, str) else value
+            
             acknowledgments = {
-                'morning_affirmation': f"Great! I'll send your morning affirmation at {value}.",
-                'day_planning': f"Perfect! Daily planning at {value} it is.",
-                'midday_affirmation': f"Excellent! Midday boost at {value}.",
-                'evening_affirmation': f"Wonderful! Evening wind-down at {value}.",
-                'accountability_checkin': f"Nice! Progress check-in at {value}.",
-                'evening_gratitude': f"Perfect! Bedtime gratitude at {value}.",
-                'weekly_reflection': f"Great! Weekly reflection on {value.get('day')} at {value.get('time')}." if isinstance(value, dict) else f"Great! Weekly reflection: {value}."
+                'morning_affirmation': f"Great! I'll send your morning affirmation at {formatted_time}.",
+                'day_planning': f"Perfect! Daily planning at {formatted_time} it is.",
+                'midday_affirmation': f"Excellent! Midday boost at {formatted_time}.",
+                'evening_affirmation': f"Wonderful! Evening wind-down at {formatted_time}.",
+                'accountability_checkin': f"Nice! Progress check-in at {formatted_time}.",
+                'evening_gratitude': f"Perfect! Bedtime gratitude at {formatted_time}.",
+                'weekly_reflection': f"Great! Weekly reflection on {value.get('day')} at {self.format_time_ampm(value.get('time'))}." if isinstance(value, dict) else f"Great! Weekly reflection: {formatted_time}."
             }
             
             message = acknowledgments.get(key, "Great!") + f"\n\n{next_question}"
@@ -615,7 +647,106 @@ class OnboardingService:
     # ==================== PARSING METHODS ====================
     
     async def parse_time(self, time_str: str, context_step: OnboardingStep = None) -> Optional[str]:
-        """Parse time string to 24-hour format using OpenAI with context awareness"""
+        """Parse time string using deterministic parser first, then OpenAI fallback"""
+        try:
+            # First try deterministic parsing
+            deterministic_result = self.parse_time_deterministic(time_str, context_step)
+            if deterministic_result:
+                logger.info(f"✅ Deterministic parsing: '{time_str}' -> '{deterministic_result}'")
+                return deterministic_result
+            
+            # Fall back to OpenAI parsing
+            logger.info(f"⚠️ Falling back to OpenAI parsing for: '{time_str}'")
+            return await self.parse_time_openai(time_str, context_step)
+            
+        except Exception as e:
+            logger.error(f"Error parsing time: {e}")
+            return None
+    
+    def parse_time_deterministic(self, time_str: str, context_step: OnboardingStep = None) -> Optional[str]:
+        """Deterministic regex-based time parsing"""
+        import re
+        
+        message = time_str.strip().lower()
+        
+        # Pattern 1: "7am", "7 am", "7pm", "7 pm"
+        match = re.match(r'(\d{1,2})\s*(am|pm)', message)
+        if match:
+            hour = int(match.group(1))
+            period = match.group(2)
+            
+            if period == 'am':
+                if hour == 12:
+                    hour = 0
+            else:  # pm
+                if hour != 12:
+                    hour += 12
+            
+            return f"{hour:02d}:00"
+        
+        # Pattern 2: "7:30am", "7:30 pm"
+        match = re.match(r'(\d{1,2}):(\d{2})\s*(am|pm)', message)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            period = match.group(3)
+            
+            if period == 'am':
+                if hour == 12:
+                    hour = 0
+            else:  # pm
+                if hour != 12:
+                    hour += 12
+            
+            return f"{hour:02d}:{minute:02d}"
+        
+        # Pattern 3: "7:30", "13:30" (24-hour format)
+        match = re.match(r'(\d{1,2}):(\d{2})$', message)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return f"{hour:02d}:{minute:02d}"
+        
+        # Pattern 4: Single number like "7", "13", "19"
+        match = re.match(r'^(\d{1,2})$', message)
+        if match:
+            hour = int(match.group(1))
+            
+            # If it's clearly 24-hour format (13-23), use as is
+            if 13 <= hour <= 23:
+                return f"{hour:02d}:00"
+            
+            # For ambiguous hours (1-12), use context
+            if 1 <= hour <= 12:
+                if context_step in [OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING]:
+                    # Morning context - assume AM
+                    return f"{hour:02d}:00"
+                elif context_step in [OnboardingStep.EVENING_AFFIRMATION, OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
+                    # Evening context - assume PM
+                    if hour != 12:
+                        hour += 12
+                    return f"{hour:02d}:00"
+                elif context_step == OnboardingStep.MIDDAY_AFFIRMATION:
+                    # Midday context - 12-3 PM range
+                    if hour <= 3:
+                        hour += 12
+                    return f"{hour:02d}:00"
+            
+            # Default to AM for ambiguous cases
+            return f"{hour:02d}:00"
+        
+        # Special cases
+        if message in ['noon', '12pm', '12 pm']:
+            return "12:00"
+        if message in ['midnight', '12am', '12 am']:
+            return "00:00"
+        
+        return None
+    
+    async def parse_time_openai(self, time_str: str, context_step: OnboardingStep = None) -> Optional[str]:
+        """OpenAI-based time parsing as fallback"""
         try:
             # Build context for intelligent parsing
             context_info = ""
@@ -678,6 +809,26 @@ class OnboardingService:
         except Exception as e:
             logger.error(f"Error parsing time with OpenAI: {e}")
             return None
+    
+    def format_time_ampm(self, time_24h: str) -> str:
+        """Convert 24-hour time to AM/PM format"""
+        try:
+            if not time_24h or ':' not in time_24h:
+                return time_24h
+            
+            hour, minute = time_24h.split(':')
+            hour = int(hour)
+            
+            if hour == 0:
+                return f"12:{minute} AM"
+            elif hour < 12:
+                return f"{hour}:{minute} AM"
+            elif hour == 12:
+                return f"12:{minute} PM"
+            else:
+                return f"{hour-12}:{minute} PM"
+        except:
+            return time_24h
     
     async def parse_weekly_time(self, message: str) -> Tuple[Optional[str], Optional[str]]:
         """Parse weekly reflection day and time using OpenAI for natural language understanding"""
