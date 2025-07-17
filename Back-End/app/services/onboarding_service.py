@@ -187,85 +187,39 @@ class OnboardingService:
     # ==================== CONVERSATIONAL AI ONBOARDING ====================
     
     async def generate_conversational_response(self, user_id: str, user_message: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate conversational AI response that naturally collects schedule preferences"""
+        """Generate conversational AI response with reliable time extraction"""
         try:
             logger.error(f"🚨 CONVERSATIONAL AI - Starting for user {user_id} with message: {user_message}")
+            
             # Get conversation history for context
             conversation_history = self.build_conversation_context(preferences)
             logger.error(f"🚨 CONVERSATION CONTEXT: {conversation_history}")
             
-            # Create a context-aware system prompt with forced extraction
-            system_prompt = f"""
-            You are Maya, an AI life coach. Your ONLY job is to extract times from user messages.
-
-            CONVERSATION STATUS:
-            {conversation_history}
-
-            CRITICAL EXTRACTION RULES:
-            1. If context says "FIRST CONVERSATION" - introduce yourself as Maya
-            2. If context says "ONGOING CONVERSATION" - DON'T re-introduce yourself
-            3. MANDATORY: When user mentions ANY time, format your response EXACTLY like this:
-               
-               User: "I wake up at 7"
-               Response: "Perfect! [EXTRACTED: morning_affirmation: 07:00] When do you usually plan your day?"
-               
-               User: "At 8" 
-               Response: "Great! [EXTRACTED: day_planning: 08:00] What about your midday boost time?"
-               
-               User: "Around 13"
-               Response: "Excellent! [EXTRACTED: midday_affirmation: 13:00] When do you wind down in the evening?"
-
-            4. NEVER respond without [EXTRACTED: key: value] when times are mentioned
-            5. The extraction marker is MANDATORY - your response will be rejected without it
-            6. After extracting, ask for the NEXT missing item from the "Still need" list
-            7. When you have all 7 times, add: [ONBOARDING_COMPLETE]
-
-            FOLLOW THE EXACT FORMAT ABOVE. NO EXCEPTIONS.
-            """
+            # STEP 1: Try to extract time from user message directly
+            extracted_time = await self.extract_time_from_message(user_message, preferences)
+            logger.error(f"🚨 EXTRACTED TIME: {extracted_time}")
             
-            logger.error(f"🚨 CONVERSATIONAL AI - Sending to OpenAI with prompt length: {len(system_prompt)}")
-            
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                max_tokens=300,
-                temperature=0.8
-            )
-            
-            ai_message = response.choices[0].message.content.strip()
-            logger.error(f"🚨 CONVERSATIONAL AI - OpenAI response: {ai_message}")
-            
-            # Extract any preferences from the AI's response
-            extracted_prefs = self.extract_preferences_from_response(ai_message)
-            
-            # Save extracted preferences
-            for key, value in extracted_prefs.items():
+            if extracted_time:
+                # STEP 2: Save the extracted time
+                key, value = extracted_time
                 await self.supabase.set_preference_value(user_id, key, value)
-            
-            # Check if onboarding is complete
-            if "[ONBOARDING_COMPLETE]" in ai_message:
-                await self.supabase.mark_onboarding_completed(user_id)
-                await self.supabase.set_preference_value(user_id, "onboarding_step", None)
+                logger.error(f"🚨 SAVED PREFERENCE: {key} = {value}")
                 
-                # Clean up the message
-                clean_message = ai_message.replace("[ONBOARDING_COMPLETE]", "").strip()
-                clean_message += "\n\n" + self.get_completion_message()
+                # STEP 3: Generate natural response acknowledging the time
+                ai_response = await self.generate_natural_response(key, value, preferences)
+                logger.error(f"🚨 NATURAL RESPONSE: {ai_response}")
                 
                 return {
-                    "completed": True,
-                    "message": clean_message
+                    "completed": ai_response.get("completed", False),
+                    "message": ai_response.get("message", "Great! What's next?")
                 }
-            
-            # Clean up any extraction markers from the message
-            clean_message = self.clean_extraction_markers(ai_message)
-            
-            return {
-                "completed": False,
-                "message": clean_message
-            }
+            else:
+                # No time found - generate a clarifying question
+                clarifying_response = await self.generate_clarifying_response(user_message, preferences)
+                return {
+                    "completed": False,
+                    "message": clarifying_response
+                }
             
         except Exception as e:
             logger.error(f"🚨 CONVERSATIONAL AI ERROR: {e}")
@@ -273,6 +227,112 @@ class OnboardingService:
                 "completed": False,
                 "message": "Tell me a bit about your daily routine - when do you usually start your day?"
             }
+    
+    async def extract_time_from_message(self, message: str, preferences: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+        """Extract time and determine which schedule key it belongs to"""
+        try:
+            # Determine what we're asking for based on what's missing
+            missing_items = [
+                ('morning_affirmation', 'wake up'),
+                ('day_planning', 'planning'),
+                ('midday_affirmation', 'midday'),
+                ('evening_affirmation', 'evening'),
+                ('accountability_checkin', 'progress'),
+                ('evening_gratitude', 'bedtime'),
+                ('weekly_reflection', 'weekly')
+            ]
+            
+            # Find the first missing item
+            for key, label in missing_items:
+                if not preferences.get(key):
+                    if key == 'weekly_reflection':
+                        day, time = await self.parse_weekly_time(message)
+                        if day and time:
+                            return (key, {"day": day, "time": time})
+                    else:
+                        parsed_time = await self.parse_time(message)
+                        if parsed_time:
+                            return (key, parsed_time)
+                    break
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error extracting time from message: {e}")
+            return None
+    
+    async def generate_natural_response(self, key: str, value: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate natural response after successfully extracting time"""
+        try:
+            # Check if we have all required items
+            all_items = ['morning_affirmation', 'day_planning', 'midday_affirmation', 
+                        'evening_affirmation', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection']
+            
+            # Update preferences with new value
+            preferences[key] = value
+            
+            # Count completed items
+            completed_count = sum(1 for item in all_items if preferences.get(item))
+            
+            if completed_count >= 7:
+                return {
+                    "completed": True,
+                    "message": f"Perfect! That completes your schedule. {self.get_completion_message()}"
+                }
+            
+            # Generate next question
+            next_question = await self.get_next_question(preferences)
+            
+            # Generate acknowledgment
+            acknowledgments = {
+                'morning_affirmation': f"Great! I'll send your morning affirmation at {value}.",
+                'day_planning': f"Perfect! Daily planning at {value} it is.",
+                'midday_affirmation': f"Excellent! Midday boost at {value}.",
+                'evening_affirmation': f"Wonderful! Evening wind-down at {value}.",
+                'accountability_checkin': f"Nice! Progress check-in at {value}.",
+                'evening_gratitude': f"Perfect! Bedtime gratitude at {value}.",
+                'weekly_reflection': f"Great! Weekly reflection on {value.get('day')} at {value.get('time')}." if isinstance(value, dict) else f"Great! Weekly reflection: {value}."
+            }
+            
+            message = acknowledgments.get(key, "Great!") + f"\n\n{next_question}"
+            
+            return {
+                "completed": False,
+                "message": message
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating natural response: {e}")
+            return {
+                "completed": False,
+                "message": "What's your next preferred time?"
+            }
+    
+    async def generate_clarifying_response(self, message: str, preferences: Dict[str, Any]) -> str:
+        """Generate clarifying question when no time is detected"""
+        try:
+            next_question = await self.get_next_question(preferences)
+            return f"I didn't catch a specific time in your message. {next_question}"
+        except Exception as e:
+            logger.error(f"Error generating clarifying response: {e}")
+            return "Could you please tell me what time works best for you?"
+    
+    async def get_next_question(self, preferences: Dict[str, Any]) -> str:
+        """Get the next question to ask based on what's missing"""
+        questions = [
+            ('morning_affirmation', "What time do you usually wake up?"),
+            ('day_planning', "When do you like to plan your day?"),
+            ('midday_affirmation', "What time would you like a midday boost?"),
+            ('evening_affirmation', "When do you prefer to wind down in the evening?"),
+            ('accountability_checkin', "What time should I check in on your daily progress?"),
+            ('evening_gratitude', "What time do you usually go to bed?"),
+            ('weekly_reflection', "Which day and time would you like your weekly reflection?")
+        ]
+        
+        for key, question in questions:
+            if not preferences.get(key):
+                return question
+        
+        return "What other time preferences do you have?"
     
     async def generate_initial_conversation(self) -> str:
         """Generate the opening conversational message"""
