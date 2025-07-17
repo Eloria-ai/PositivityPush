@@ -105,11 +105,6 @@ class OnboardingService:
             logger.error(f"🚨 ONBOARDING DEBUG - User {user_id}: completed={onboarding_completed} (type: {type(onboarding_completed)}), step={onboarding_step}")
             logger.error(f"🚨 ONBOARDING DEBUG - Full preferences: {preferences}")
             
-            # Check if user needs onboarding (default to completed=True if not explicitly set to False)
-            if onboarding_completed == True or onboarding_completed is None:
-                logger.info(f"User {user_id} has completed onboarding, skipping")
-                return {"is_onboarding": False}
-            
             # Reset onboarding for testing if user says "reset" or "restart"
             if message.lower().strip() in ["reset", "restart", "start over"]:
                 logger.info(f"Resetting onboarding for user {user_id}")
@@ -123,6 +118,14 @@ class OnboardingService:
                 await self.supabase.set_preference_value(user_id, "accountability_checkin", None)
                 await self.supabase.set_preference_value(user_id, "evening_gratitude", None)
                 await self.supabase.set_preference_value(user_id, "weekly_reflection", None)
+                # Update the preferences object to reflect the reset
+                preferences["onboarding_completed"] = False
+                onboarding_completed = False
+            
+            # Check if user needs onboarding (default to completed=True if not explicitly set to False)
+            if onboarding_completed == True or onboarding_completed is None:
+                logger.info(f"User {user_id} has completed onboarding, skipping")
+                return {"is_onboarding": False}
             
             if onboarding_completed == False:
                 logger.info(f"User {user_id} needs onboarding, proceeding with conversational AI")
