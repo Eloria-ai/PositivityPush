@@ -54,7 +54,7 @@ def send_onboarding_message(self, wa_id: str, message: str, message_type: str = 
         )
 
 @current_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def send_onboarding_welcome_flow(self, user_id: str, wa_id: str):
+def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip: str = None):
     """
     Send welcome message + first question for onboarding
     
@@ -70,40 +70,32 @@ def send_onboarding_welcome_flow(self, user_id: str, wa_id: str):
         supabase_service = SupabaseService(db)
         whatsapp_service = WhatsAppService()
         
-        # Get onboarding messages
+        # Get onboarding messages using new interface
         from app.services.onboarding_service import OnboardingService
         onboarding_service = OnboardingService(supabase_service)
         
-        # Use sync version of start_onboarding (we need to create this)
-        from app.services.onboarding_service import OnboardingStep
-        messages = {
-            "welcome_message": onboarding_service.get_welcome_message(),
-            "first_question": onboarding_service.questions.get(OnboardingStep.START)
-        }
-        
-        # Set initial onboarding state in database
+        # Use start_onboarding method (includes timezone detection and first question)
         import asyncio
-        asyncio.run(supabase_service.set_preference_value(user_id, "onboarding_step", "morning_affirmation"))
+        onboarding_result = asyncio.run(onboarding_service.start_onboarding(user_id, client_ip))
+        
+        if not onboarding_result:
+            logger.error(f"Failed to start onboarding for user {user_id}")
+            return {"status": "error", "message": "Failed to start onboarding"}
+        
+        # Extract messages from result
+        messages = onboarding_result.get("messages", [])
         
         if not messages:
             logger.error(f"No onboarding messages generated for user {user_id}")
             return {"status": "error", "message": "No messages generated"}
         
-        # Send welcome message
-        welcome_msg = messages.get("welcome_message")
-        if welcome_msg:
-            import asyncio
-            success = asyncio.run(whatsapp_service.send_message(wa_id, welcome_msg))
-            if not success:
-                raise Exception("Failed to send welcome message")
-        
-        # Send first question
-        first_question = messages.get("first_question")
-        if first_question:
-            import asyncio
-            success = asyncio.run(whatsapp_service.send_message(wa_id, first_question))
-            if not success:
-                raise Exception("Failed to send first question")
+        # Send all onboarding messages in sequence
+        for i, message in enumerate(messages):
+            if message:
+                import asyncio
+                success = asyncio.run(whatsapp_service.send_message(wa_id, message))
+                if not success:
+                    raise Exception(f"Failed to send onboarding message {i+1}")
         
         logger.info(f"Successfully sent onboarding welcome flow to {user_id}")
         return {"status": "success", "user_id": user_id, "wa_id": wa_id}

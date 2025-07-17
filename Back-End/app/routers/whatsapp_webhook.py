@@ -268,9 +268,14 @@ async def handle_activation_message(
             }
         )
         
-        # Start onboarding process via Celery task
+        # Start onboarding process via Celery task with client IP for timezone detection
+        # Note: For WhatsApp webhook, we don't have direct access to user's IP
+        # The IP we get is from Twilio/Meta servers, not user's actual IP
+        client_ip = None  # Will fallback to UTC timezone detection
+        logger.info(f"Starting onboarding with timezone detection")
+        
         from worker.tasks.onboarding_tasks import send_onboarding_welcome_flow
-        send_onboarding_welcome_flow.delay(subscription["id"], wa_id)
+        send_onboarding_welcome_flow.delay(subscription["id"], wa_id, client_ip)
         
         logger.info(f"Successfully activated subscription and started onboarding for {wa_id}")
         
@@ -318,6 +323,16 @@ async def handle_coaching_message_with_subscription(
             if response_message:
                 from worker.tasks.onboarding_tasks import send_onboarding_response
                 send_onboarding_response.delay(subscription["id"], wa_id, response_message)
+            
+            # Check if onboarding was completed in this interaction
+            if onboarding_result.get("completed"):
+                logger.info(f"🎉 Onboarding completed for user {subscription['id']}")
+                # Mark onboarding as completed in database
+                await supabase_service.mark_onboarding_completed(subscription["id"])
+                # Clear onboarding step
+                await supabase_service.set_preference_value(subscription["id"], "onboarding_step", None)
+                logger.info(f"✅ Database updated: onboarding_completed = True for user {subscription['id']}")
+            
             return
         
         # Log conversation
