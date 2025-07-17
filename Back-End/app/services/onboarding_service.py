@@ -250,7 +250,9 @@ class OnboardingService:
                         if day and time:
                             return (key, {"day": day, "time": time})
                     else:
-                        parsed_time = await self.parse_time(message)
+                        # Pass context for intelligent parsing
+                        context_step = self.get_context_step_for_key(key)
+                        parsed_time = await self.parse_time(message, context_step)
                         if parsed_time:
                             return (key, parsed_time)
                     break
@@ -259,6 +261,19 @@ class OnboardingService:
         except Exception as e:
             logger.error(f"Error extracting time from message: {e}")
             return None
+    
+    def get_context_step_for_key(self, key: str) -> OnboardingStep:
+        """Map preference key to OnboardingStep for context-aware parsing"""
+        key_to_step = {
+            'morning_affirmation': OnboardingStep.MORNING_AFFIRMATION,
+            'day_planning': OnboardingStep.DAY_PLANNING,
+            'midday_affirmation': OnboardingStep.MIDDAY_AFFIRMATION,
+            'evening_affirmation': OnboardingStep.EVENING_AFFIRMATION,
+            'accountability_checkin': OnboardingStep.ACCOUNTABILITY_CHECKIN,
+            'evening_gratitude': OnboardingStep.SLEEP_TIME,
+            'weekly_reflection': OnboardingStep.WEEKLY_REFLECTION
+        }
+        return key_to_step.get(key, OnboardingStep.START)
     
     async def generate_natural_response(self, key: str, value: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
         """Generate natural response after successfully extracting time"""
