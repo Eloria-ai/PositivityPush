@@ -328,18 +328,9 @@ def test_manual_task_trigger():
     
     print("=" * 40)
 
-# Test manual task trigger on worker startup (ALWAYS RUN FOR DEBUGGING)
-try:
-    print("🚀 RUNNING WORKER STARTUP TEST...")
-    test_manual_task_trigger()
-except Exception as e:
-    print(f"Worker test failed: {e}")
-
-# Debug queue configuration
-print("📋 CELERY QUEUE CONFIGURATION:")
-print(f"Task routes: {celery_app.conf.task_routes}")
-print(f"Default queue: {celery_app.conf.task_default_queue}")
-print("🔧 Using simplified queue setup - all tasks go to 'celery' queue")
+# Debug functions available for manual testing
+# Call test_manual_task_trigger() manually when debugging
+# Call test_celery_config() manually to verify configuration
 
 if __name__ == '__main__':
     # Run configuration test

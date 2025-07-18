@@ -14,6 +14,7 @@ from app.config import settings
 from app.deps import get_supabase_client, get_stripe_client
 from app.services.stripe_service import StripeService
 from app.services.supabase_client import SupabaseService
+from app.services.email_service import EmailService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -121,7 +122,17 @@ async def handle_checkout_completed(session: Dict[str, Any], supabase_service: S
     
     await supabase_service.create_subscription(subscription_data)
     
-    # TODO: Send thank you email
+    # Send welcome email
+    if customer_email:
+        email_service = EmailService()
+        email_sent = await email_service.send_welcome_email(customer_email, subscription_data)
+        if email_sent:
+            logger.info(f"Welcome email sent to {customer_email} for session: {session['id']}")
+        else:
+            logger.error(f"Failed to send welcome email to {customer_email} for session: {session['id']}")
+    else:
+        logger.warning(f"No customer email found for session: {session['id']}")
+    
     logger.info(f"Subscription created for session: {session['id']}")
 
 async def handle_payment_succeeded(invoice: Dict[str, Any], supabase_service: SupabaseService):

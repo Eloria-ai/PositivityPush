@@ -16,7 +16,7 @@ class TimezoneService:
     """Service for detecting and managing user timezones from phone and IP"""
     
     def __init__(self):
-        self.ip_api_url = "http://ip-api.com/json/"
+        self.ip_api_url = "https://ip-api.com/json/"
         self.backup_api_url = "https://ipapi.co/"
         
     async def detect_timezone_from_ip(self, ip_address: str) -> Optional[str]:
@@ -52,38 +52,44 @@ class TimezoneService:
             return "UTC"
     
     async def _try_ip_api(self, ip_address: str) -> Optional[str]:
-        """Try timezone detection using ip-api.com"""
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(f"{self.ip_api_url}{ip_address}")
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("status") == "success":
-                        timezone = data.get("timezone")
-                        if timezone and self._validate_timezone(timezone):
-                            logger.info(f"Detected timezone {timezone} for IP {ip_address} via ip-api.com")
-                            return timezone
-                        
-        except Exception as e:
-            logger.error(f"Error with ip-api.com for IP {ip_address}: {e}")
+        """Try timezone detection using ip-api.com with retry logic"""
+        for attempt in range(2):  # 2 attempts max
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(f"{self.ip_api_url}{ip_address}")
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get("status") == "success":
+                            timezone = data.get("timezone")
+                            if timezone and self._validate_timezone(timezone):
+                                logger.info(f"Detected timezone {timezone} for IP {ip_address} via ip-api.com")
+                                return timezone
+                            
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1} failed for ip-api.com (IP {ip_address}): {e}")
+                if attempt == 1:  # Last attempt
+                    logger.error(f"Final attempt failed for ip-api.com (IP {ip_address}): {e}")
         
         return None
     
     async def _try_ipapi_co(self, ip_address: str) -> Optional[str]:
-        """Try timezone detection using ipapi.co"""
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(f"{self.backup_api_url}{ip_address}/timezone/")
-                
-                if response.status_code == 200:
-                    timezone = response.text.strip()
-                    if timezone and self._validate_timezone(timezone):
-                        logger.info(f"Detected timezone {timezone} for IP {ip_address} via ipapi.co")
-                        return timezone
-                        
-        except Exception as e:
-            logger.error(f"Error with ipapi.co for IP {ip_address}: {e}")
+        """Try timezone detection using ipapi.co with retry logic"""
+        for attempt in range(2):  # 2 attempts max
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(f"{self.backup_api_url}{ip_address}/timezone/")
+                    
+                    if response.status_code == 200:
+                        timezone = response.text.strip()
+                        if timezone and self._validate_timezone(timezone):
+                            logger.info(f"Detected timezone {timezone} for IP {ip_address} via ipapi.co")
+                            return timezone
+                            
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1} failed for ipapi.co (IP {ip_address}): {e}")
+                if attempt == 1:  # Last attempt
+                    logger.error(f"Final attempt failed for ipapi.co (IP {ip_address}): {e}")
         
         return None
     

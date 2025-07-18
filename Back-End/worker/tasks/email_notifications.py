@@ -152,11 +152,22 @@ async def _send_payment_failed_notification_async(customer_data):
     
     email_service = EmailService()
     
-    # TODO: Create payment failed email template in EmailService
-    # For now, log the event
-    logger.info(f"Payment failed notification logged for {customer_data.get('email')}")
-    
-    return {"status": "logged", "email": customer_data.get('email')}
+    try:
+        success = await email_service.send_payment_failed_email(
+            to_email=customer_data['email'],
+            customer_data=customer_data
+        )
+        
+        if success:
+            logger.info(f"Payment failed notification sent to {customer_data['email']}")
+            return {"status": "sent", "email": customer_data['email']}
+        else:
+            logger.error(f"Failed to send payment failed notification to {customer_data['email']}")
+            return {"status": "failed", "email": customer_data['email']}
+            
+    except Exception as e:
+        logger.error(f"Error in payment failed notification service: {e}")
+        raise
 
 @shared_task(bind=True, max_retries=3)
 def send_subscription_cancelled_notification(self, customer_data):
@@ -176,56 +187,23 @@ async def _send_subscription_cancelled_notification_async(customer_data):
     
     email_service = EmailService()
     
-    # TODO: Create cancellation email template in EmailService
-    # For now, log the event
-    logger.info(f"Cancellation notification logged for {customer_data.get('email')}")
-    
-    return {"status": "logged", "email": customer_data.get('email')}
-
-@shared_task(bind=True, max_retries=2)
-def send_monthly_newsletter(self):
-    """
-    Send monthly newsletter to all active subscribers
-    """
-    logger.info("Starting monthly newsletter send")
-    
     try:
-        return asyncio.run(_send_monthly_newsletter_async())
+        success = await email_service.send_cancellation_email(
+            to_email=customer_data['email'],
+            customer_data=customer_data
+        )
+        
+        if success:
+            logger.info(f"Cancellation notification sent to {customer_data['email']}")
+            return {"status": "sent", "email": customer_data['email']}
+        else:
+            logger.error(f"Failed to send cancellation notification to {customer_data['email']}")
+            return {"status": "failed", "email": customer_data['email']}
+            
     except Exception as e:
-        logger.error(f"Error in monthly newsletter task: {e}")
-        raise self.retry(exc=e, countdown=600)
+        logger.error(f"Error in cancellation notification service: {e}")
+        raise
 
-async def _send_monthly_newsletter_async():
-    """Async implementation of monthly newsletter"""
-    
-    # Initialize services
-    db = get_supabase_client()
-    supabase_service = SupabaseService(db)
-    email_service = EmailService()
-    
-    # Get all active subscribers
-    subscribers = await supabase_service.get_active_subscribers()
-    
-    sent_count = 0
-    error_count = 0
-    
-    # TODO: Create newsletter template and content
-    newsletter_subject = "Your Monthly Positivity Insights 🌟"
-    
-    for subscriber in subscribers:
-        try:
-            if subscriber.get('email'):
-                # TODO: Generate personalized newsletter content
-                # For now, skip actual sending and just log
-                logger.info(f"Would send newsletter to {subscriber['email']}")
-                sent_count += 1
-                
-        except Exception as e:
-            error_count += 1
-            logger.error(f"Error processing subscriber {subscriber.get('id', 'unknown')}: {e}")
-    
-    logger.info(f"Monthly newsletter complete. Would send: {sent_count}, Errors: {error_count}")
-    return {"sent": sent_count, "errors": error_count}
 
 # Helper functions
 async def _already_sent_activation_reminder(subscriber_id: str, supabase_service: SupabaseService) -> bool:
@@ -272,14 +250,7 @@ def _generate_whatsapp_activation_link(session_id: str) -> str:
 def cleanup_failed_email_logs():
     """
     Clean up old failed email logs (keep for 30 days)
+    Note: Email logs are handled by SendGrid - no cleanup needed
     """
-    logger.info("Starting cleanup of email logs")
-    
-    try:
-        # TODO: Implement email log cleanup if we store email logs
-        logger.info("Email log cleanup completed")
-        return {"status": "completed"}
-        
-    except Exception as e:
-        logger.error(f"Error in email log cleanup: {e}")
-        return {"error": str(e)}
+    logger.info("Email log cleanup - no action needed (SendGrid handles email logs)")
+    return {"status": "completed", "message": "SendGrid handles email logs"}

@@ -232,7 +232,7 @@ class OnboardingService:
                 }
             
         except Exception as e:
-            logger.error(f"🚨 CONVERSATIONAL AI ERROR: {e}")
+            logger.error(f"Error in conversational AI processing: {e}")
             return {
                 "completed": False,
                 "message": "Tell me a bit about your daily routine - when do you usually start your day?"
