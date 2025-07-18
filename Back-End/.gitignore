@@ -125,4 +125,5 @@ logs/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.dbcelerybeat-schedule.db
+Thumbs.db
+celerybeat-schedule.db
