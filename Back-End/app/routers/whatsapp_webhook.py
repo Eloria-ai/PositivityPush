@@ -389,7 +389,7 @@ async def store_client_ip(
         # Update subscription with client IP
         subscription = await supabase_service.get_subscription_by_session(session_id)
         if subscription:
-            supabase_service.update_subscription(
+            await supabase_service.update_subscription(
                 subscription["id"], 
                 {"client_ip": client_ip}
             )
