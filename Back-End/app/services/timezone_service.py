@@ -516,7 +516,7 @@ class TimezoneService:
                     user_id, 
                     {
                         'current_timezone': detected_timezone,
-                        'timezone_updated_at': 'now()'
+                        'timezone_updated_at': datetime.utcnow().isoformat()
                     }
                 )
                 

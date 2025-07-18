@@ -151,17 +151,9 @@ class OnboardingService:
     async def start_onboarding(self, user_id: str, client_ip: str = None) -> Dict[str, Any]:
         """
         Start onboarding flow - returns messages to enqueue
-        Automatically detects timezone from IP address
+        User will be asked to provide timezone manually during onboarding
         """
         try:
-            # Detect timezone automatically
-            if client_ip:
-                detected_timezone = await self.timezone_service.detect_timezone_from_ip(client_ip)
-                logger.info(f"Detected timezone for user {user_id}: {detected_timezone}")
-                
-                # Set timezone immediately
-                await self.supabase.set_preference_value(user_id, "timezone", detected_timezone)
-            
             # Clear default schedule preferences to ensure clean onboarding
             await self.clear_default_schedule_preferences(user_id)
             
@@ -217,8 +209,17 @@ class OnboardingService:
             if extracted_time:
                 # STEP 2: Save the extracted time
                 key, value = extracted_time
-                await self.supabase.set_preference_value(user_id, key, value)
-                logger.info(f"Saved preference: {key} = {value}")
+                
+                # Handle timezone specially - store in current_timezone column
+                if key == 'current_timezone':
+                    await self.supabase.update_subscription(user_id, {
+                        'current_timezone': value,
+                        'timezone_updated_at': datetime.utcnow().isoformat()
+                    })
+                    logger.info(f"Saved timezone: {value}")
+                else:
+                    await self.supabase.set_preference_value(user_id, key, value)
+                    logger.info(f"Saved preference: {key} = {value}")
                 
                 # STEP 3: Generate natural response acknowledging the time
                 ai_response = await self.generate_natural_response(key, value, preferences, user_id)
@@ -270,7 +271,8 @@ class OnboardingService:
                     'evening_affirmation': 'evening_affirmation',
                     'accountability_checkin': 'accountability_checkin',
                     'evening_gratitude': 'evening_gratitude',
-                    'weekly_reflection': 'weekly_reflection'
+                    'weekly_reflection': 'weekly_reflection',
+                    'timezone_location': 'current_timezone'
                 }
                 
                 current_key = step_to_key.get(current_step)
@@ -280,6 +282,15 @@ class OnboardingService:
                         day, time = await self.parse_weekly_time(message)
                         if day and time:
                             return (current_key, {"day": day, "time": time})
+                    elif current_key == 'current_timezone':
+                        # Handle timezone extraction using the natural language parser
+                        timezone_detected = self.timezone_service.extract_timezone(message)
+                        if timezone_detected:
+                            return (current_key, timezone_detected)
+                        else:
+                            # If no valid timezone found, log and return None to trigger clarification
+                            logger.warning(f"No valid timezone found in message: {message}")
+                            return None
                     else:
                         parsed_time = await self.parse_time(message, self.get_context_step_for_key(current_key))
                         if parsed_time:
@@ -1228,11 +1239,11 @@ class OnboardingService:
             User input: "{message}"
             
             STRICT PARSING RULES:
-            - "Sunday at 10" -> {{"day": "sunday", "time": "10:00"}}
-            - "Sunday 11" -> {{"day": "sunday", "time": "11:00"}}
-            - "Sunday 11 am" -> {{"day": "sunday", "time": "11:00"}}
-            - "Monday 9am" -> {{"day": "monday", "time": "09:00"}}
-            - "Friday evening 7" -> {{"day": "friday", "time": "19:00"}}
+            - "Sunday at 10" -> {{"day": "sunday", "time": "10:00", "am_pm": null}}
+            - "Sunday 11" -> {{"day": "sunday", "time": "11:00", "am_pm": null}}
+            - "Sunday 11 am" -> {{"day": "sunday", "time": "11:00", "am_pm": "am"}}
+            - "Monday 9am" -> {{"day": "monday", "time": "09:00", "am_pm": "am"}}
+            - "Friday evening 7" -> {{"day": "friday", "time": "19:00", "am_pm": "pm"}}
             
             DEFAULT ASSUMPTIONS:
             - Weekly reflection times are typically morning (AM) unless specified
@@ -1243,8 +1254,8 @@ class OnboardingService:
             
             Valid days: monday, tuesday, wednesday, thursday, friday, saturday, sunday
             
-            Return JSON: {{"day": "dayname", "time": "HH:MM"}}
-            If parsing fails: {{"day": null, "time": null}}
+            Return JSON: {{"day": "dayname", "time": "HH:MM", "am_pm": "am"|"pm"|null}}
+            If parsing fails: {{"day": null, "time": null, "am_pm": null}}
             
             Return ONLY the JSON object.
             """
@@ -1266,6 +1277,7 @@ class OnboardingService:
                     data = json.loads(result.strip())
                     day = data.get('day', '').lower()
                     time_str = data.get('time', '')
+                    am_pm = data.get('am_pm')
                     
                     # Handle null values from failed parsing
                     if not day or not time_str or day == 'null' or time_str == 'null':
@@ -1278,6 +1290,21 @@ class OnboardingService:
                     
                     # Validate time format
                     if re.match(r'^[0-2][0-9]:[0-5][0-9]$', time_str):
+                        # Extract hour from time string for ambiguity check
+                        hour = int(time_str.split(':')[0])
+                        minute = time_str.split(':')[1]
+                        
+                        # If hour is 1-11 and AM/PM was not specified, ask for clarification
+                        if am_pm is None and 1 <= hour <= 11:
+                            logger.debug("Weekly reflection time ambiguous—missing AM/PM")
+                            return None, None  # triggers clarification message
+                        
+                        # Convert to 24-hour format if AM/PM was specified
+                        if am_pm == "pm" and 1 <= hour <= 11:
+                            time_str = f"{hour+12:02d}:{minute}"
+                        elif am_pm == "am" and hour == 12:
+                            time_str = f"00:{minute}"
+                        
                         return day, time_str
                     
                 except json.JSONDecodeError:
@@ -1288,43 +1315,8 @@ class OnboardingService:
             logger.error(f"Error parsing weekly time with OpenAI: {e}")
             return None, None
     
-    def parse_timezone(self, timezone_str: str) -> Optional[str]:
-        """Parse and validate timezone"""
-        timezone_str = timezone_str.strip().upper()
-        
-        # Common timezone mappings
-        timezone_map = {
-            'EST': 'EST', 'EASTERN': 'EST', 'ET': 'EST',
-            'CST': 'CST', 'CENTRAL': 'CST', 'CT': 'CST',
-            'MST': 'MST', 'MOUNTAIN': 'MST', 'MT': 'MST',
-            'PST': 'PST', 'PACIFIC': 'PST', 'PT': 'PST',
-            'UTC': 'UTC', 'GMT': 'UTC', 'COORDINATED UNIVERSAL TIME': 'UTC',
-            'CET': 'CET', 'CENTRAL EUROPEAN': 'CET',
-            'BST': 'BST', 'BRITISH': 'BST',
-            'JST': 'JST', 'JAPAN': 'JST',
-            'AEST': 'AEST', 'AUSTRALIAN': 'AEST'
-        }
-        
-        # Direct match
-        if timezone_str in timezone_map:
-            return timezone_map[timezone_str]
-        
-        # City-based detection
-        city_zones = {
-            'NEW YORK': 'EST', 'BOSTON': 'EST', 'MIAMI': 'EST',
-            'CHICAGO': 'CST', 'DALLAS': 'CST', 'HOUSTON': 'CST',
-            'DENVER': 'MST', 'PHOENIX': 'MST',
-            'LOS ANGELES': 'PST', 'SAN FRANCISCO': 'PST', 'SEATTLE': 'PST',
-            'LONDON': 'GMT', 'PARIS': 'CET', 'BERLIN': 'CET', 'ROME': 'CET',
-            'TOKYO': 'JST', 'SYDNEY': 'AEST'
-        }
-        
-        for city, zone in city_zones.items():
-            if city in timezone_str:
-                return zone
-        
-        # If no match found, return UTC as fallback
-        return 'UTC'
+    # Note: parse_timezone method removed - now using TimezoneService.extract_timezone() 
+    # which properly handles IANA timezone zones (e.g., 'America/New_York' instead of 'EST')
     
     def calculate_gratitude_time(self, sleep_time: str) -> str:
         """Calculate gratitude time (30 minutes before sleep)"""

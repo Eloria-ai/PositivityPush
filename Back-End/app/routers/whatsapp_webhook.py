@@ -242,31 +242,8 @@ async def handle_coaching_message_with_subscription(
             )
             return
         
-        # Check for timezone changes (for traveling users) - prefer phone-based detection
-        timezone_service = TimezoneService()
-        
-        # Create message object for timezone detection (include all available metadata)
-        message_for_tz = {
-            "timestamp": message_metadata.get("timestamp") if message_metadata else message_id,
-            "client_ip": client_ip,
-            "wa_id": wa_id,
-            "text": message_text,
-            "metadata": message_metadata or {},
-            "context": {},
-            "full_message": message_metadata.get("full_message") if message_metadata else {}
-        }
-        
-        new_timezone = await timezone_service.update_user_timezone_from_message(
-            subscription["id"], message_for_tz, supabase_service
-        )
-        if new_timezone:
-            logger.info(f"Updated timezone for user {subscription['id']} to {new_timezone}")
-            # Optionally notify user of timezone change
-            await whatsapp_service.send_message(
-                wa_id,
-                f"🌍 I noticed you might be in a different timezone now. I've updated your schedule to {new_timezone}. "
-                f"Your messages will now be sent at the right times for your current location!"
-            )
+        # Note: Automatic timezone detection removed - users now update timezone manually
+        # via natural language (e.g., "I'm in London now") or during onboarding
         
         # Check for natural language timezone updates (e.g., "I'm in London now", "Africa/Casablanca")
         timezone_service = TimezoneService()
