@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+def extract_client_ip(request: Request) -> str:
+    """Extract real client IP from request headers"""
+    return (
+        request.headers.get("cf-connecting-ip") or
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip() or
+        request.headers.get("x-real-ip") or
+        getattr(request.client, 'host', None) or
+        "unknown"
+    )
+
 @router.get("/webhook")
 async def whatsapp_webhook_verify(
     mode: str = Query(alias="hub.mode"),
@@ -54,6 +64,10 @@ async def whatsapp_webhook(
     """
     
     try:
+        # Extract client IP for timezone detection
+        client_ip = extract_client_ip(request)
+        logger.info(f"WhatsApp webhook received from IP: {client_ip}")
+        
         # Initialize services
         supabase_service = SupabaseService(db)
         whatsapp_service = WhatsAppService()
@@ -70,7 +84,8 @@ async def whatsapp_webhook(
                     json_data,
                     supabase_service,
                     whatsapp_service,
-                    ai_coach
+                    ai_coach,
+                    client_ip=client_ip
                 )
                 return JSONResponse(content={"status": "success"})
         
@@ -106,7 +121,8 @@ async def whatsapp_webhook(
                     subscription,
                     supabase_service,
                     whatsapp_service,
-                    ai_coach
+                    ai_coach,
+                    client_ip=client_ip
                 )
         
         return JSONResponse(content={"status": "success"})
@@ -122,7 +138,8 @@ async def process_whatsapp_business_message(
     webhook_data: Dict[str, Any],
     supabase_service: SupabaseService,
     whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService
+    ai_coach: AICoachService,
+    client_ip: str = None
 ):
     """Process WhatsApp Business API webhook data"""
     
@@ -169,7 +186,7 @@ async def process_whatsapp_business_message(
                     # Handle regular coaching conversation
                     await handle_coaching_message_with_subscription(
                         wa_id, message_text, message_id, subscription, supabase_service, whatsapp_service, ai_coach, 
-                        client_ip=None, message_metadata=message_metadata
+                        client_ip=client_ip, message_metadata=message_metadata
                     )
 
 async def process_message(
@@ -211,7 +228,8 @@ async def process_twilio_message(
     subscription: dict,
     supabase_service: SupabaseService,
     whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService
+    ai_coach: AICoachService,
+    client_ip: str = None
 ):
     """Process message from Twilio WhatsApp webhook"""
     
@@ -225,7 +243,7 @@ async def process_twilio_message(
     else:
         # Handle regular coaching conversation - pass the subscription we already found
         await handle_coaching_message_with_subscription(
-            from_number, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach, client_ip=None, message_metadata=None
+            from_number, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach, client_ip=client_ip, message_metadata=None
         )
 
 async def handle_activation_message(
@@ -524,10 +542,7 @@ async def store_client_ip(
             )
         
         # Get real client IP from headers
-        client_ip = request.headers.get("cf-connecting-ip") or \
-                   request.headers.get("x-forwarded-for", "").split(",")[0].strip() or \
-                   request.headers.get("x-real-ip") or \
-                   request.client.host
+        client_ip = extract_client_ip(request)
         
         logger.info(f"Storing client IP {client_ip} for session {session_id}")
         
