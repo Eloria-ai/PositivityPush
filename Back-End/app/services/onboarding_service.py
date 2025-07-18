@@ -102,8 +102,8 @@ class OnboardingService:
             onboarding_completed = preferences.get("onboarding_completed", True)
             onboarding_step = preferences.get("onboarding_step")
             
-            logger.error(f"🚨 ONBOARDING DEBUG - User {user_id}: completed={onboarding_completed} (type: {type(onboarding_completed)}), step={onboarding_step}")
-            logger.error(f"🚨 ONBOARDING DEBUG - Full preferences: {preferences}")
+            logger.debug(f"User {user_id}: completed={onboarding_completed} (type: {type(onboarding_completed)}), step={onboarding_step}")
+            logger.debug(f"Full preferences: {preferences}")
             
             # Reset onboarding for testing if user says "reset" or "restart"
             if message.lower().strip() in ["reset", "restart", "start over"]:
@@ -1124,7 +1124,7 @@ class OnboardingService:
             Examples of natural acknowledgments:
             "Awesome! I'll send your morning motivation at 7:00 AM to help kickstart your day. What time do you usually plan your day?"
             "Perfect! A 1:00 PM energy boost sounds ideal for that afternoon slump. When do you prefer to wind down in the evening?"
-            "Love it! Sunday at 11:00 AM is perfect for reflecting on your week. That completes your personalized schedule!"
+            "Love it! Sunday at 11:00 AM is perfect for reflecting on your week."
             
             Write a natural acknowledgment for {activity} at {formatted_time}:
             """

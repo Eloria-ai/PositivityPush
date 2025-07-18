@@ -384,12 +384,12 @@ async def handle_coaching_message_with_subscription(
             return
         
         # Check if user is in onboarding process
-        logger.error(f"🚨 WEBHOOK DEBUG - About to check onboarding for user {subscription['id']}")
+        logger.info(f"Checking onboarding status for user {subscription['id']}")
         onboarding_service = OnboardingService(supabase_service)
         onboarding_result = await onboarding_service.process_webhook_message(
             subscription["id"], wa_id, message_text
         )
-        logger.error(f"🚨 WEBHOOK DEBUG - Onboarding result: {onboarding_result}")
+        logger.debug(f"Onboarding result: {onboarding_result}")
         
         # If in onboarding, enqueue response message and return
         if onboarding_result.get("is_onboarding"):

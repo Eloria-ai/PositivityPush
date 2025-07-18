@@ -161,12 +161,21 @@ The system uses a multi-layered approach to detect user timezones:
 2. **IP-based detection (fallback)**: Uses external APIs to detect timezone from IP address
 3. **Manual commands**: Users can update timezone with "update timezone" command
 
-**Limitations:**
-- WhatsApp typically provides Unix timestamps without timezone offsets
-- Phone metadata rarely includes explicit timezone information
-- Success rate depends on WhatsApp API version and message format
-- Phone-based detection may often return None, requiring IP-based fallback
-- IP-based detection requires external API calls and may be less accurate for VPNs
+**Limitations & Detection Priority:**
+
+**Phone-based detection (primary method):**
+- ⚠️ **Limited success rate**: WhatsApp typically provides Unix timestamps without timezone offsets
+- ⚠️ **Minimal metadata**: Phone metadata rarely includes explicit timezone information  
+- ⚠️ **API version dependent**: Success rate depends on WhatsApp API version and message format
+- ⚠️ **Frequent failures**: Phone-based detection often returns None, requiring fallback
+
+**IP-based detection (primary fallback):**
+- ✅ **Higher reliability**: More consistent results than phone detection
+- ⚠️ **External API dependency**: Requires external API calls (ip-api.com, ipapi.co)
+- ⚠️ **VPN/Proxy issues**: Less accurate for users behind VPNs or proxies
+- ⚠️ **Rate limits**: May hit API rate limits with high user volume
+
+**Recommendation**: Treat IP-based detection as the primary method with phone detection as supplementary, contrary to initial assumptions.
 
 ## Environment Variables
 

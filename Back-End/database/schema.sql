@@ -29,7 +29,12 @@ CREATE TABLE IF NOT EXISTS subscribers (
     personal_goals JSONB DEFAULT '{}',
     communication_style JSONB DEFAULT '{}',
     active_challenges JSONB DEFAULT '[]',
-    timezone VARCHAR(50) DEFAULT 'UTC',
+    timezone VARCHAR(50) DEFAULT 'UTC', -- Original timezone from onboarding
+    
+    -- Dynamic Timezone Tracking (for traveling users)
+    current_timezone VARCHAR(50) DEFAULT 'UTC', -- User's actual timezone based on phone/IP detection
+    timezone_updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), -- When timezone was last updated
+    client_ip VARCHAR(45), -- IPv6 max length, for IP-based timezone detection fallback
     
     -- User Scheduling Preferences
     preferences JSONB DEFAULT '{
@@ -127,6 +132,8 @@ CREATE INDEX IF NOT EXISTS idx_subscribers_stripe_session ON subscribers(stripe_
 CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status);
 CREATE INDEX IF NOT EXISTS idx_subscribers_preferences ON subscribers USING GIN (preferences);
 CREATE INDEX IF NOT EXISTS idx_subscribers_onboarding ON subscribers ((preferences->>'onboarding_completed'));
+CREATE INDEX IF NOT EXISTS idx_subscribers_current_timezone ON subscribers(current_timezone);
+CREATE INDEX IF NOT EXISTS idx_subscribers_timezone_updated ON subscribers(timezone_updated_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_subscriber_timestamp ON conversations(subscriber_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_user_progress_subscriber_week ON user_progress(subscriber_id, week_start DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduled_messages_pending ON scheduled_messages(status, scheduled_for) WHERE status = 'pending';

@@ -242,12 +242,13 @@ class SupabaseService:
             return []
     
     async def get_subscribers_for_daily_message(self, timezone: str = None) -> List[Dict[str, Any]]:
-        """Get subscribers ready for daily messages based on timezone"""
+        """Get subscribers ready for daily messages based on current timezone"""
         try:
             query = self.client.table("subscribers").select("*").eq("status", "active")
             
             if timezone:
-                query = query.eq("timezone", timezone)
+                # Use current_timezone instead of old timezone field
+                query = query.eq("current_timezone", timezone)
             
             result = query.execute()
             return result.data
@@ -267,7 +268,8 @@ class SupabaseService:
             )
             
             if timezone:
-                query = query.filter("preferences->>timezone", "eq", timezone)
+                # Use current_timezone instead of preferences timezone
+                query = query.eq("current_timezone", timezone)
             
             # Get all matching subscribers
             result = query.execute()

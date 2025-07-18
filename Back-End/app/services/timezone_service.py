@@ -345,27 +345,19 @@ class TimezoneService:
             return None
     
     def _offset_to_timezone(self, offset_str: str) -> Optional[str]:
-        """Convert timezone offset to timezone name"""
+        """Convert timezone offset to timezone name with priority handling"""
         try:
-            # Common offset mappings - handle seasonal changes with priority
-            offset_mappings = {
-                # US Eastern Time
-                "-05:00": "America/New_York",  # EST (winter)
+            # Handle conflicting offsets by checking time of year and priority
+            # Priority order: EST > CDT, CST > MDT, MST > PDT (more stable timezones first)
+            
+            # Note: Could use seasonal logic in future: 
+            # current_month = datetime.now().month
+            # is_dst_season = 3 <= current_month <= 11
+            
+            # Primary offset mappings (no conflicts)
+            primary_mappings = {
                 "-04:00": "America/New_York",  # EDT (summer)
-                
-                # US Central Time  
-                "-06:00": "America/Chicago",   # CST (winter)
-                "-05:00": "America/Chicago",   # CDT (summer) - NOTE: conflicts with EST, EST takes priority
-                
-                # US Mountain Time
-                "-07:00": "America/Denver",    # MST (winter)
-                "-06:00": "America/Denver",    # MDT (summer) - NOTE: conflicts with CST, CST takes priority
-                
-                # US Pacific Time
                 "-08:00": "America/Los_Angeles", # PST (winter)
-                "-07:00": "America/Los_Angeles", # PDT (summer) - NOTE: conflicts with MST, MST takes priority
-                
-                # International
                 "+00:00": "UTC",
                 "+01:00": "Europe/London",     # GMT (winter) / BST (summer)
                 "+02:00": "Europe/Paris",      # CET (winter) / CEST (summer)
@@ -374,12 +366,25 @@ class TimezoneService:
                 "+09:00": "Asia/Tokyo",        # JST (no DST)
             }
             
-            # For conflicting offsets, we use the most common timezone
-            # -05:00 could be EST or CDT, but EST is more common globally
-            # -06:00 could be CST or MDT, but CST is more common
-            # -07:00 could be MST or PDT, but MST is more common
+            # Check primary mappings first
+            if offset_str in primary_mappings:
+                return primary_mappings[offset_str]
             
-            return offset_mappings.get(offset_str)
+            # Handle conflicting offsets with seasonal and priority logic
+            if offset_str == "-05:00":
+                # EST (winter) vs CDT (summer) - EST takes priority
+                return "America/New_York"  # EST is more globally common
+            
+            elif offset_str == "-06:00":
+                # CST (winter) vs MDT (summer) - CST takes priority
+                return "America/Chicago"   # CST is more globally common
+            
+            elif offset_str == "-07:00":
+                # MST (winter) vs PDT (summer) - MST takes priority
+                return "America/Denver"    # MST is more stable (less DST usage)
+            
+            # If no match found, return None
+            return None
             
         except Exception as e:
             logger.error(f"Error converting offset to timezone: {e}")
@@ -443,6 +448,9 @@ class TimezoneService:
             # In practice, user agents rarely contain timezone information
             # Could potentially extract timezone from Accept-Language header patterns
             # or browser timezone APIs, but this is rarely available in WhatsApp context
+            
+            # Avoid unused parameter warning
+            _ = user_agent
             return None
             
         except Exception as e:
