@@ -199,25 +199,25 @@ class OnboardingService:
     async def generate_conversational_response(self, user_id: str, user_message: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
         """Generate conversational AI response with reliable time extraction"""
         try:
-            logger.error(f"🚨 CONVERSATIONAL AI - Starting for user {user_id} with message: {user_message}")
+            logger.debug(f"Conversational AI - Starting for user {user_id} with message: {user_message}")
             
             # Get conversation history for context
             conversation_history = self.build_conversation_context(preferences)
-            logger.error(f"🚨 CONVERSATION CONTEXT: {conversation_history}")
+            logger.debug(f"Conversation context: {conversation_history}")
             
             # STEP 1: Try to extract time from user message directly
             extracted_time = await self.extract_time_from_message(user_message, preferences)
-            logger.error(f"🚨 EXTRACTED TIME: {extracted_time}")
+            logger.debug(f"Extracted time: {extracted_time}")
             
             if extracted_time:
                 # STEP 2: Save the extracted time
                 key, value = extracted_time
                 await self.supabase.set_preference_value(user_id, key, value)
-                logger.error(f"🚨 SAVED PREFERENCE: {key} = {value}")
+                logger.info(f"Saved preference: {key} = {value}")
                 
                 # STEP 3: Generate natural response acknowledging the time
                 ai_response = await self.generate_natural_response(key, value, preferences, user_id)
-                logger.error(f"🚨 NATURAL RESPONSE: {ai_response}")
+                logger.debug(f"Natural response: {ai_response}")
                 
                 return {
                     "completed": ai_response.get("completed", False),
