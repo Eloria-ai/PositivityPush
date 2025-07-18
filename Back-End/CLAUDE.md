@@ -50,7 +50,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - User taps **Send** to activate coaching
 
 ### 4. Activate in WhatsApp
-- Meta's Cloud API posts activation message to FastAPI `/whatsapp/webhook`
+- Twilio WhatsApp API posts activation message to FastAPI `/whatsapp/webhook`
 - Backend parses session ID from message text
 - Matches session ID with Supabase subscription record
 - **Updates record**: Links `wa_id` to subscription, status → "active"
@@ -79,7 +79,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | API | FastAPI + Railway | AI conversations, Stripe/WhatsApp webhooks |
 | Queue/Jobs | Redis + Celery | Personalized scheduled messages |
 | Database | Supabase | User subscriptions, personal profiles, conversations |
-| Messaging | Meta WhatsApp Cloud API | AI message delivery |
+| Messaging | Twilio WhatsApp API | AI message delivery |
 | Payments | Stripe | Subscription management, webhooks |
 | Email | SendGrid/Mailgun | Thank you emails, invoices, notifications |
 | Monitoring | Sentry + PostHog | Errors, usage analytics |
@@ -185,10 +185,10 @@ OPENAI_API_KEY=sk-proj-...
 MEM0_URL=https://mem0.api.url
 MEM0_API_KEY=mem0-key
 
-# WhatsApp Business (to be set up)
-WA_TOKEN=WhatsApp_Business_Token
-WA_PHONE_ID=WhatsApp_Phone_Number_ID  
-WA_BUSINESS_NUMBER=1234567890
+# Twilio WhatsApp API (to be set up)
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_PHONE_NUMBER=whatsapp:+14155238886
 
 # Stripe Integration (to be set up)
 STRIPE_SECRET=sk_live_...

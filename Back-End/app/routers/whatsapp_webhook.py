@@ -66,64 +66,47 @@ async def whatsapp_webhook(
     try:
         # Extract client IP for timezone detection
         client_ip = extract_client_ip(request)
-        logger.info(f"WhatsApp webhook received from IP: {client_ip}")
+        logger.info(f"Twilio WhatsApp webhook received from IP: {client_ip}")
         
         # Initialize services
         supabase_service = SupabaseService(db)
         whatsapp_service = WhatsAppService()
         ai_coach = AICoachService()
         
-        # Try to get JSON data first (WhatsApp Business API)
-        try:
-            json_data = await request.json()
-            logger.info(f"Received WhatsApp Business API webhook: {json_data}")
-            
-            # Handle WhatsApp Business API format
-            if json_data.get("object") == "whatsapp_business_account":
-                await process_whatsapp_business_message(
-                    json_data,
-                    supabase_service,
-                    whatsapp_service,
-                    ai_coach,
-                    client_ip=client_ip
-                )
-                return JSONResponse(content={"status": "success"})
+        # Parse Twilio form data
+        form_data = await request.form()
+        logger.info(f"Received Twilio WhatsApp webhook: {dict(form_data)}")
         
-        except Exception:
-            # Fall back to Twilio format (form data)
-            form_data = await request.form()
-            logger.info(f"Received Twilio WhatsApp webhook: {dict(form_data)}")
+        # Extract message data from Twilio format
+        message_body = form_data.get("Body", "")
+        from_number = form_data.get("From", "")
+        to_number = form_data.get("To", "")
+        
+        # Clean phone numbers (remove "whatsapp:" prefix)
+        from_number = from_number.replace("whatsapp:", "") if from_number else ""
+        to_number = to_number.replace("whatsapp:", "") if to_number else ""
+        
+        logger.info(f"Message from {from_number}: {message_body}")
+        
+        if message_body and from_number:
+            # Look up subscription once here
+            subscription = await supabase_service.get_subscription_by_wa_id(from_number)
+            logger.info(f"SUBSCRIPTION LOOKUP for '{from_number}': {subscription is not None}")
+            if subscription:
+                logger.info(f"Found subscription ID: {subscription.get('id')}, Status: {subscription.get('status')}")
+            else:
+                logger.info(f"No subscription found for {from_number} - will send test response")
             
-            # Extract message data from Twilio format
-            message_body = form_data.get("Body", "")
-            from_number = form_data.get("From", "")
-            to_number = form_data.get("To", "")
-            
-            # Clean phone numbers (remove "whatsapp:" prefix)
-            from_number = from_number.replace("whatsapp:", "") if from_number else ""
-            to_number = to_number.replace("whatsapp:", "") if to_number else ""
-            
-            logger.info(f"Message from {from_number}: {message_body}")
-            
-            if message_body and from_number:
-                # Look up subscription once here
-                subscription = await supabase_service.get_subscription_by_wa_id(from_number)
-                logger.info(f"SUBSCRIPTION LOOKUP for '{from_number}': {subscription is not None}")
-                if subscription:
-                    logger.info(f"Found subscription ID: {subscription.get('id')}, Status: {subscription.get('status')}")
-                else:
-                    logger.info(f"No subscription found for {from_number} - will send test response")
-                
-                await process_twilio_message(
-                    message_body,
-                    from_number,
-                    to_number,
-                    subscription,
-                    supabase_service,
-                    whatsapp_service,
-                    ai_coach,
-                    client_ip=client_ip
-                )
+            await process_twilio_message(
+                message_body,
+                from_number,
+                to_number,
+                subscription,
+                supabase_service,
+                whatsapp_service,
+                ai_coach,
+                client_ip=client_ip
+            )
         
         return JSONResponse(content={"status": "success"})
         
@@ -133,93 +116,6 @@ async def whatsapp_webhook(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Webhook processing failed"
         )
-
-async def process_whatsapp_business_message(
-    webhook_data: Dict[str, Any],
-    supabase_service: SupabaseService,
-    whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService,
-    client_ip: str = None
-):
-    """Process WhatsApp Business API webhook data"""
-    
-    entries = webhook_data.get("entry", [])
-    
-    for entry in entries:
-        changes = entry.get("changes", [])
-        
-        for change in changes:
-            value = change.get("value", {})
-            messages = value.get("messages", [])
-            
-            for message in messages:
-                # Skip status messages
-                if message.get("type") == "status":
-                    continue
-                    
-                wa_id = message["from"]
-                message_text = message.get("text", {}).get("body", "")
-                message_id = message["id"]
-                
-                # Extract additional metadata for timezone detection
-                message_timestamp = message.get("timestamp")
-                message_metadata = {
-                    "timestamp": message_timestamp,
-                    "type": message.get("type"),
-                    "id": message_id,
-                    "from": wa_id,
-                    "full_message": message  # Store full message for timezone detection
-                }
-                
-                logger.info(f"Processing WhatsApp Business message from {wa_id}: {message_text}")
-                
-                # Look up subscription
-                subscription = await supabase_service.get_subscription_by_wa_id(wa_id)
-                logger.info(f"SUBSCRIPTION LOOKUP for '{wa_id}': {subscription is not None}")
-                
-                # Check if this is an activation message
-                if message_text.startswith("POSITIVITY-PUSH START"):
-                    await handle_activation_message(
-                        wa_id, message_text, supabase_service, whatsapp_service, ai_coach
-                    )
-                else:
-                    # Handle regular coaching conversation
-                    await handle_coaching_message_with_subscription(
-                        wa_id, message_text, message_id, subscription, supabase_service, whatsapp_service, ai_coach, 
-                        client_ip=client_ip, message_metadata=message_metadata
-                    )
-
-async def process_message(
-    message_data: Dict[str, Any],
-    supabase_service: SupabaseService,
-    whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService
-):
-    """Process individual WhatsApp message (legacy)"""
-    
-    messages = message_data.get("messages", [])
-    
-    for message in messages:
-        # Skip status messages
-        if message.get("type") == "status":
-            continue
-            
-        wa_id = message["from"]
-        message_text = message.get("text", {}).get("body", "")
-        message_id = message["id"]
-        
-        logger.info(f"Processing message from {wa_id}: {message_text}")
-        
-        # Check if this is an activation message
-        if message_text.startswith("POSITIVITY-PUSH START"):
-            await handle_activation_message(
-                wa_id, message_text, supabase_service, whatsapp_service, ai_coach
-            )
-        else:
-            # Handle regular coaching conversation
-            await handle_coaching_message(
-                wa_id, message_text, message_id, supabase_service, whatsapp_service, ai_coach
-            )
 
 async def process_twilio_message(
     message_body: str,
@@ -460,65 +356,6 @@ async def handle_coaching_message_with_subscription(
         await whatsapp_service.send_message(
             wa_id,
             "❌ Something went wrong. Please try again or contact support."
-        )
-
-async def handle_coaching_message(
-    wa_id: str,
-    message_text: str,
-    message_id: str,
-    supabase_service: SupabaseService,
-    whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService
-):
-    """
-    Handle regular coaching conversation messages (legacy function)
-    Generate AI responses based on user context
-    """
-    
-    try:
-        # Check if user has active subscription
-        subscription = await supabase_service.get_subscription_by_wa_id(wa_id)
-        
-        if not subscription or subscription.get("status") != "active":
-            await whatsapp_service.send_message(
-                wa_id,
-                "❌ No active subscription found. Please complete your payment first at https://positivity-push.vercel.app"
-            )
-            return
-        
-        # Log conversation
-        await supabase_service.log_conversation(
-            subscription["id"],
-            message_text,
-            "user",
-            message_id
-        )
-        
-        # Generate AI response
-        ai_response = await ai_coach.generate_response(
-            user_id=subscription["id"],
-            message=message_text,
-            user_context=subscription
-        )
-        
-        # Send AI response
-        await whatsapp_service.send_message(wa_id, ai_response)
-        
-        # Log AI response
-        await supabase_service.log_conversation(
-            subscription["id"],
-            ai_response,
-            "assistant",
-            None
-        )
-        
-        logger.info(f"Successfully handled coaching message for {wa_id}")
-        
-    except Exception as e:
-        logger.error(f"Error in coaching message: {e}")
-        await whatsapp_service.send_message(
-            wa_id,
-            "❌ I'm having trouble right now. Please try again in a moment."
         )
 
 @router.post("/store-client-ip")
