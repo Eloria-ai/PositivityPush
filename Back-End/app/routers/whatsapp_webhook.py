@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 import json
 import logging
 from typing import Dict, Any, Optional
+from datetime import datetime
 
 from app.config import settings
 from app.deps import get_supabase_client
@@ -267,9 +268,25 @@ async def handle_coaching_message_with_subscription(
                 f"Your messages will now be sent at the right times for your current location!"
             )
         
-        # Check for timezone update command
+        # Check for natural language timezone updates (e.g., "I'm in London now", "Africa/Casablanca")
+        timezone_service = TimezoneService()
+        detected_timezone = timezone_service.extract_timezone(message_text)
+        if detected_timezone:
+            await supabase_service.update_subscription(
+                subscription["id"], 
+                {
+                    'current_timezone': detected_timezone,
+                    'timezone_updated_at': datetime.utcnow().isoformat()
+                }
+            )
+            await whatsapp_service.send_message(
+                wa_id,
+                f"🌍 Got it! I've switched you to {detected_timezone}. Your schedule is now in sync with your current location!"
+            )
+            return
+        
+        # Check for timezone update command (fallback)
         if message_text.lower().strip() in ["update timezone", "timezone", "change timezone", "fix timezone"]:
-            timezone_service = TimezoneService()
             if client_ip:
                 new_timezone = await timezone_service.detect_timezone_from_ip(client_ip)
                 if new_timezone:
@@ -277,7 +294,7 @@ async def handle_coaching_message_with_subscription(
                         subscription["id"], 
                         {
                             'current_timezone': new_timezone,
-                            'timezone_updated_at': 'now()'
+                            'timezone_updated_at': datetime.utcnow().isoformat()
                         }
                     )
                     await whatsapp_service.send_message(

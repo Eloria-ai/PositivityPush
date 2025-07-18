@@ -9,8 +9,12 @@ import re
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 import pytz
+from zoneinfo import available_timezones
 
 logger = logging.getLogger(__name__)
+
+# Regex pattern for extracting IANA timezone from natural language
+IANA_RE = re.compile(r"\b([A-Za-z]+/[A-Za-z_\-]+)\b")
 
 class TimezoneService:
     """Service for detecting and managing user timezones from phone and IP"""
@@ -18,6 +22,21 @@ class TimezoneService:
     def __init__(self):
         self.ip_api_url = "https://ip-api.com/json/"
         self.backup_api_url = "https://ipapi.co/"
+        
+    def extract_timezone(self, text: str) -> Optional[str]:
+        """
+        Pull the first valid IANA timezone (Region/City) from natural language text.
+        
+        Args:
+            text: User input like "I'm in London now" or "Africa/Casablanca"
+            
+        Returns:
+            Valid IANA timezone string or None if none found
+        """
+        m = IANA_RE.search(text)
+        if m and m.group(1) in available_timezones():
+            return m.group(1)
+        return None
         
     async def detect_timezone_from_ip(self, ip_address: str) -> Optional[str]:
         """

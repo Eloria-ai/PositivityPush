@@ -28,6 +28,7 @@ class OnboardingStep(Enum):
     ACCOUNTABILITY_CHECKIN = "accountability_checkin"
     SLEEP_TIME = "sleep_time"
     WEEKLY_REFLECTION = "weekly_reflection"
+    TIMEZONE_LOCATION = "timezone_location"
     COMPLETED = "completed"
 
 class OnboardingService:
@@ -51,7 +52,8 @@ class OnboardingService:
             OnboardingStep.EVENING_AFFIRMATION: OnboardingStep.ACCOUNTABILITY_CHECKIN,
             OnboardingStep.ACCOUNTABILITY_CHECKIN: OnboardingStep.SLEEP_TIME,
             OnboardingStep.SLEEP_TIME: OnboardingStep.WEEKLY_REFLECTION,
-            OnboardingStep.WEEKLY_REFLECTION: OnboardingStep.COMPLETED
+            OnboardingStep.WEEKLY_REFLECTION: OnboardingStep.TIMEZONE_LOCATION,
+            OnboardingStep.TIMEZONE_LOCATION: OnboardingStep.COMPLETED
         }
         
         # Question contexts for dynamic LLM generation
@@ -62,7 +64,8 @@ class OnboardingService:
             OnboardingStep.MIDDAY_AFFIRMATION: {"type": "evening_winddown", "emoji": "🌅"},
             OnboardingStep.EVENING_AFFIRMATION: {"type": "progress_checkin", "emoji": "💪"},
             OnboardingStep.ACCOUNTABILITY_CHECKIN: {"type": "bedtime_gratitude", "emoji": "🌙"},
-            OnboardingStep.SLEEP_TIME: {"type": "weekly_reflection", "emoji": "🗓️"}
+            OnboardingStep.SLEEP_TIME: {"type": "weekly_reflection", "emoji": "🗓️"},
+            OnboardingStep.TIMEZONE_LOCATION: {"type": "timezone_location", "emoji": "🌍"}
         }
         
         # Clarification messages
@@ -74,7 +77,8 @@ class OnboardingService:
             OnboardingStep.EVENING_AFFIRMATION: "Please enter a valid time like '6:00 PM' or '18:00'",
             OnboardingStep.ACCOUNTABILITY_CHECKIN: "Please enter a valid time like '7:00 PM' or '19:00'",
             OnboardingStep.SLEEP_TIME: "Please enter a valid time like '9:00 PM' or '21:30'",
-            OnboardingStep.WEEKLY_REFLECTION: "Please enter day and time like 'Sunday 10:00 AM' or 'Monday 9:00'"
+            OnboardingStep.WEEKLY_REFLECTION: "Please enter day and time like 'Sunday 10:00 AM' or 'Monday 9:00'",
+            OnboardingStep.TIMEZONE_LOCATION: "🕒 We respect your privacy and never track your location.\nWhat timezone are you in? (e.g. Africa/Casablanca or Europe/Amsterdam)\nIf you move later, just tell me—like 'I'm in London now'—and I'll adjust automatically."
         }
         
         # Preference keys for database storage
@@ -86,7 +90,8 @@ class OnboardingService:
             OnboardingStep.EVENING_AFFIRMATION: "evening_affirmation",
             OnboardingStep.ACCOUNTABILITY_CHECKIN: "accountability_checkin",
             OnboardingStep.SLEEP_TIME: "evening_gratitude",  # Gratitude before sleep
-            OnboardingStep.WEEKLY_REFLECTION: "weekly_reflection"
+            OnboardingStep.WEEKLY_REFLECTION: "weekly_reflection",
+            OnboardingStep.TIMEZONE_LOCATION: "current_timezone"
         }
     
     # ==================== CORE ASYNC METHODS ====================
