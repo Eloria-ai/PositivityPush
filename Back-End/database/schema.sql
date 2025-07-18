@@ -184,3 +184,15 @@ CREATE POLICY "Service role can manage all scheduled messages" ON scheduled_mess
 -- Grant permissions to service role
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
+
+-- Column comments for documentation
+COMMENT ON COLUMN subscribers.current_timezone IS 'User''s current timezone based on phone/IP detection, updated when traveling';
+COMMENT ON COLUMN subscribers.timezone_updated_at IS 'Timestamp when timezone was last updated';
+COMMENT ON COLUMN subscribers.client_ip IS 'User''s IP address for timezone detection fallback';
+COMMENT ON COLUMN subscribers.timezone IS 'Original timezone from onboarding (kept for reference)';
+
+-- Data migration for existing records (safe to run multiple times)
+-- Update existing records to set current_timezone from original timezone column
+UPDATE subscribers 
+SET current_timezone = COALESCE(timezone, 'UTC')
+WHERE current_timezone IS NULL OR current_timezone = 'UTC';

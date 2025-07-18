@@ -143,14 +143,14 @@ user_progress (
 )
 ```
 
-### Database Migration Required
+### Database Setup
 
-Run the timezone columns migration:
+Run the complete schema setup:
 ```bash
 # In Supabase SQL Editor, run:
-psql -f database/add_timezone_columns.sql
+psql -f database/schema.sql
 
-# Or copy/paste the contents of add_timezone_columns.sql
+# Or copy/paste the contents of schema.sql
 ```
 
 ### Timezone Detection System
