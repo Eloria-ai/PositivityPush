@@ -90,7 +90,7 @@ async def whatsapp_webhook(
         
         if message_body and from_number:
             # Look up subscription once here
-            subscription = supabase_service.get_subscription_by_wa_id(from_number)
+            subscription = await supabase_service.get_subscription_by_wa_id(from_number)
             logger.info(f"SUBSCRIPTION LOOKUP for '{from_number}': {subscription is not None}")
             if subscription:
                 logger.info(f"Found subscription ID: {subscription.get('id')}, Status: {subscription.get('status')}")
@@ -324,7 +324,7 @@ async def handle_coaching_message_with_subscription(
             return
         
         # Log conversation
-        supabase_service.log_conversation(
+        await supabase_service.log_conversation(
             subscription["id"],
             message_text,
             "user",
@@ -342,7 +342,7 @@ async def handle_coaching_message_with_subscription(
         await whatsapp_service.send_message(wa_id, ai_response)
         
         # Log AI response
-        supabase_service.log_conversation(
+        await supabase_service.log_conversation(
             subscription["id"],
             ai_response,
             "assistant",
