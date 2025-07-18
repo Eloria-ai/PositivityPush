@@ -120,7 +120,7 @@ async def handle_checkout_completed(session: Dict[str, Any], supabase_service: S
         "created_at": "now()",
     }
     
-    await supabase_service.create_subscription(subscription_data)
+    supabase_service.create_subscription(subscription_data)
     
     # Send welcome email
     if customer_email:
@@ -141,7 +141,7 @@ async def handle_payment_succeeded(invoice: Dict[str, Any], supabase_service: Su
     
     # Update subscription status if needed
     customer_id = invoice['customer']
-    await supabase_service.update_subscription_by_customer(
+    supabase_service.update_subscription_by_customer(
         customer_id, 
         {"status": "active", "last_payment_at": "now()"}
     )
@@ -151,7 +151,7 @@ async def handle_payment_failed(invoice: Dict[str, Any], supabase_service: Supab
     logger.info(f"Processing payment failure for invoice: {invoice['id']}")
     
     customer_id = invoice['customer']
-    await supabase_service.update_subscription_by_customer(
+    supabase_service.update_subscription_by_customer(
         customer_id,
         {"status": "payment_failed", "failed_payment_at": "now()"}
     )
