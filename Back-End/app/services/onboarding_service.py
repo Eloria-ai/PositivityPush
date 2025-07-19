@@ -456,10 +456,14 @@ class OnboardingService:
             # Check if this is a weekly reflection clarification that needs AM/PM
             current_step = preferences.get('onboarding_step')
             is_weekly_reflection = current_step == 'weekly_reflection'
-            contains_time_like_11 = any(word in message.lower() for word in ['11', 'eleven'])
             
-            if is_weekly_reflection and contains_time_like_11:
-                return "I got the day and time, but could you clarify if that's 11:00 AM or 11:00 PM? For example, 'Sunday 11 AM' or 'Sunday 11 PM'."
+            # Check for any ambiguous time (1-12) in the message  
+            ambiguous_times = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12',
+                              'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
+            contains_ambiguous_time = any(word in message.lower().split() for word in ambiguous_times)
+            
+            if is_weekly_reflection and contains_ambiguous_time:
+                return "I got the day and time, but could you clarify if that's AM or PM? For example, 'Sunday 10 AM' or 'Sunday 10 PM'."
             
             # Generate natural clarification using AI
             prompt = f"""
@@ -1204,11 +1208,11 @@ class OnboardingService:
             - "Monday 9am" -> {{"day": "monday", "time": "09:00", "am_pm": "am"}}
             - "Friday evening 7" -> {{"day": "friday", "time": "19:00", "am_pm": "pm"}}
             
-            DEFAULT ASSUMPTIONS:
-            - Weekly reflection times are typically morning (AM) unless specified
-            - "10" means "10:00" (10 AM)
-            - "11" means "11:00" (11 AM)
-            - "11 am" means "11:00" (11 AM)
+            CLARIFICATION REQUIRED:
+            - Ambiguous times (1-12 without AM/PM) require clarification
+            - "10" triggers "10 AM or 10 PM?" prompt  
+            - "12" triggers "12 AM or 12 PM?" prompt
+            - "11 am" means "11:00" (11 AM) - no clarification needed
             - Handle natural language like "Sunday at 11 am" or "Sunday 11 am"
             
             Valid days: monday, tuesday, wednesday, thursday, friday, saturday, sunday
@@ -1253,11 +1257,10 @@ class OnboardingService:
                         hour = int(time_str.split(':')[0])
                         minute = time_str.split(':')[1]
                         
-                        # For weekly reflection, default to AM for ambiguous times (1-11 without AM/PM)
-                        # Most people do weekly reflections in the morning anyway
-                        if am_pm is None and 1 <= hour <= 11:
-                            logger.debug(f"Weekly reflection time defaulting to AM: {hour}:00 → {hour:02d}:{minute}")
-                            am_pm = "am"  # Default to AM for weekly reflections
+                        # For weekly reflection, require AM/PM clarification for ambiguous times (1-12 without AM/PM)
+                        if am_pm is None and 1 <= hour <= 12:
+                            logger.debug(f"Weekly reflection time ambiguous - requiring AM/PM clarification for {hour}:00")
+                            return None, None  # triggers clarification message
                         
                         # Convert to 24-hour format if AM/PM was specified
                         if am_pm == "pm" and 1 <= hour <= 11:
