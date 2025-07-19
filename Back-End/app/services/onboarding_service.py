@@ -70,14 +70,14 @@ class OnboardingService:
             OnboardingStep.TIMEZONE_LOCATION: "🕒 We respect your privacy and never track your location.\nWhat timezone are you in? (e.g. Africa/Casablanca or Europe/Amsterdam)\nIf you move later, just tell me—like 'I'm in London now'—and I'll adjust automatically."
         }
         
-        # Preference keys for database storage
+        # Preference keys for database storage - maps each step to what it collects
         self.preference_keys = {
-            OnboardingStep.START: "day_planning",  # START question asks for day planning time
-            OnboardingStep.DAY_PLANNING: "day_planning",
-            OnboardingStep.ACCOUNTABILITY_CHECKIN: "accountability_checkin",
-            OnboardingStep.SLEEP_TIME: "evening_gratitude",  # Gratitude before sleep
-            OnboardingStep.WEEKLY_REFLECTION: "weekly_reflection",
-            OnboardingStep.TIMEZONE_LOCATION: "current_timezone"
+            OnboardingStep.START: "day_planning",  # START step asks for day planning time
+            OnboardingStep.DAY_PLANNING: "accountability_checkin",  # DAY_PLANNING step asks for accountability time
+            OnboardingStep.ACCOUNTABILITY_CHECKIN: "evening_gratitude",  # ACCOUNTABILITY step asks for sleep/gratitude time
+            OnboardingStep.SLEEP_TIME: "weekly_reflection",  # SLEEP_TIME step asks for weekly reflection
+            OnboardingStep.WEEKLY_REFLECTION: "current_timezone",  # WEEKLY_REFLECTION step asks for timezone
+            OnboardingStep.TIMEZONE_LOCATION: "current_timezone"  # Fallback (should not be used)
         }
     
     # ==================== CORE ASYNC METHODS ====================
@@ -298,13 +298,11 @@ class OnboardingService:
             
             # Fallback to finding first missing item (original behavior)
             missing_items = [
-                ('morning_affirmation', 'wake up'),
                 ('day_planning', 'planning'),
-                ('midday_affirmation', 'midday'),
-                ('evening_affirmation', 'evening'),
                 ('accountability_checkin', 'progress'),
                 ('evening_gratitude', 'bedtime'),
-                ('weekly_reflection', 'weekly')
+                ('weekly_reflection', 'weekly'),
+                ('current_timezone', 'timezone')
             ]
             
             # Find the first missing item
@@ -314,6 +312,11 @@ class OnboardingService:
                         day, time = await self.parse_weekly_time(message)
                         if day and time:
                             return (key, {"day": day, "time": time})
+                    elif key == 'current_timezone':
+                        # Handle timezone extraction using the natural language parser
+                        timezone_detected = self.timezone_service.extract_timezone(message)
+                        if timezone_detected:
+                            return (key, timezone_detected)
                     else:
                         # Pass context for intelligent parsing
                         context_step = self.get_context_step_for_key(key)
@@ -345,10 +348,7 @@ class OnboardingService:
         if has_correction_intent:
             # Look for specific schedule mentions
             schedule_keywords = {
-                'morning_affirmation': ['morning', 'wake', 'wakeup', 'wake up', 'affirmation'],
                 'day_planning': ['planning', 'plan', 'day plan', 'schedule'],
-                'midday_affirmation': ['midday', 'lunch', 'noon', 'afternoon', 'boost'],
-                'evening_affirmation': ['evening', 'wind down', 'winddown', 'relax'],
                 'accountability_checkin': ['progress', 'check in', 'checkin', 'accountability'],
                 'evening_gratitude': ['bedtime', 'sleep', 'gratitude', 'bed'],
                 'weekly_reflection': ['weekly', 'week', 'reflection', 'review']
@@ -383,7 +383,8 @@ class OnboardingService:
             'day_planning': OnboardingStep.DAY_PLANNING,
             'accountability_checkin': OnboardingStep.ACCOUNTABILITY_CHECKIN,
             'evening_gratitude': OnboardingStep.SLEEP_TIME,
-            'weekly_reflection': OnboardingStep.WEEKLY_REFLECTION
+            'weekly_reflection': OnboardingStep.WEEKLY_REFLECTION,
+            'current_timezone': OnboardingStep.TIMEZONE_LOCATION
         }
         return key_to_step.get(key, OnboardingStep.START)
     
@@ -391,7 +392,7 @@ class OnboardingService:
         """Generate natural response after successfully extracting time"""
         try:
             # Check if we have all required items (affirmation times are now fixed)
-            all_items = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection']
+            all_items = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection', 'current_timezone']
             
             # Update preferences with new value
             preferences[key] = value
@@ -399,7 +400,7 @@ class OnboardingService:
             # Count completed items
             completed_count = sum(1 for item in all_items if preferences.get(item))
             
-            if completed_count >= 4:
+            if completed_count >= 5:
                 return {
                     "completed": True,
                     "message": self.get_completion_message()
@@ -504,7 +505,8 @@ class OnboardingService:
                 ('day_planning', "When do you like to plan your day?"),
                 ('accountability_checkin', "What time should I check in on your daily progress?"),
                 ('evening_gratitude', "What time do you usually go to bed?"),
-                ('weekly_reflection', "Which day and time would you like your weekly reflection?")
+                ('weekly_reflection', "Which day and time would you like your weekly reflection?"),
+                ('current_timezone', "What timezone are you in? (e.g. Africa/Casablanca or Europe/Amsterdam)")
             ]
             
             for key, default_question in questions_mapping:
@@ -523,13 +525,11 @@ class OnboardingService:
         try:
             # Activity descriptions for context
             activity_descriptions = {
-                'morning_affirmation': 'start your day with a positive affirmation',
                 'day_planning': 'organize and plan your day',
-                'midday_affirmation': 'get an energy boost during the day',
-                'evening_affirmation': 'wind down and relax in the evening',
                 'accountability_checkin': 'check in on your daily progress',
                 'evening_gratitude': 'practice gratitude before bed',
-                'weekly_reflection': 'reflect on your week and plan ahead'
+                'weekly_reflection': 'reflect on your week and plan ahead',
+                'current_timezone': 'determine your timezone for perfectly timed messages'
             }
             
             activity = activity_descriptions.get(schedule_key, 'receive a message')
@@ -578,29 +578,11 @@ class OnboardingService:
             
             # Fallback to varied static questions
             question_variations = {
-                'morning_affirmation': [
-                    "What time do you usually wake up?",
-                    "When do you start your day?",
-                    "What time would you like your morning inspiration?",
-                    "When should I send your daily motivation?"
-                ],
                 'day_planning': [
                     "When do you like to plan your day?",
                     "What time works best for organizing your schedule?",
                     "When do you prefer to set your daily goals?",
                     "What time should I help you plan your day?"
-                ],
-                'midday_affirmation': [
-                    "What time would you like a midday boost?",
-                    "When do you need an energy pick-me-up?",
-                    "What time works for your afternoon motivation?",
-                    "When should I send your midday inspiration?"
-                ],
-                'evening_affirmation': [
-                    "When do you prefer to wind down in the evening?",
-                    "What time do you like to relax and unwind?",
-                    "When should I send your evening relaxation message?",
-                    "What time works best for your evening wind-down?"
                 ],
                 'accountability_checkin': [
                     "What time should I check in on your daily progress?",
@@ -619,6 +601,12 @@ class OnboardingService:
                     "When should we review your weekly progress?",
                     "What day and time works for your weekly check-in?",
                     "When would you like to reflect on your week?"
+                ],
+                'current_timezone': [
+                    "What timezone are you in? (e.g. Africa/Casablanca or Europe/Amsterdam)",
+                    "Which timezone should I use for your perfectly timed messages?",
+                    "What's your current timezone? (like America/New_York or Europe/London)",
+                    "Which timezone should I set for your location?"
                 ]
             }
             
@@ -632,7 +620,8 @@ class OnboardingService:
             'day_planning',
             'accountability_checkin',
             'evening_gratitude',
-            'weekly_reflection'
+            'weekly_reflection',
+            'current_timezone'
         ]
         
         for key in all_keys:
@@ -677,15 +666,13 @@ class OnboardingService:
         context_parts = []
         missing_parts = []
         
-        # Track what we have and what we need
+        # Track what we have and what we need (only personalized preferences, not fixed affirmation times)
         schedule_items = [
-            ('morning_affirmation', 'Morning wake-up'),
             ('day_planning', 'Day planning'), 
-            ('midday_affirmation', 'Midday boost'),
-            ('evening_affirmation', 'Evening wind-down'),
             ('accountability_checkin', 'Progress check-in'),
             ('evening_gratitude', 'Bedtime/gratitude'),
-            ('weekly_reflection', 'Weekly reflection')
+            ('weekly_reflection', 'Weekly reflection'),
+            ('current_timezone', 'Timezone')
         ]
         
         for key, label in schedule_items:
@@ -716,10 +703,7 @@ class OnboardingService:
         
         # Look for extraction markers - more flexible patterns
         extraction_patterns = [
-            (r'\[EXTRACTED: morning_affirmation: ([^\]]+)\]', 'morning_affirmation'),
             (r'\[EXTRACTED: day_planning: ([^\]]+)\]', 'day_planning'),
-            (r'\[EXTRACTED: midday_affirmation: ([^\]]+)\]', 'midday_affirmation'),
-            (r'\[EXTRACTED: evening_affirmation: ([^\]]+)\]', 'evening_affirmation'),
             (r'\[EXTRACTED: accountability_checkin: ([^\]]+)\]', 'accountability_checkin'),
             (r'\[EXTRACTED: evening_gratitude: ([^\]]+)\]', 'evening_gratitude'),
             (r'\[EXTRACTED: weekly_reflection: ([^\]]+)\]', 'weekly_reflection')
@@ -764,7 +748,7 @@ class OnboardingService:
             
             # Build context from previous answers - only include actual completed steps
             previous_answers = []
-            preference_keys = ['morning_affirmation', 'day_planning', 'midday_affirmation', 'evening_affirmation', 'accountability_checkin', 'evening_gratitude']
+            preference_keys = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection']
             
             for key in preference_keys:
                 value = user_preferences.get(key)
@@ -774,27 +758,15 @@ class OnboardingService:
             previous_context = "\n".join(previous_answers) if previous_answers else "This is the first question - no previous answers yet."
             
             question_prompts = {
-                "morning_affirmation": f"""Generate a warm, conversational question asking when the user wants their morning affirmation. 
-                Keep it natural and friendly. Start with the emoji ⏰ and make it feel like a personal coach asking.""",
+                "day_planning": f"""Generate a warm, conversational question asking when the user wants to plan their day. 
+                Keep it natural and friendly. Start with the emoji 📝 and make it feel like a personal coach asking.""",
                 
-                "day_planning": f"""The user wants morning affirmations at {user_preferences.get('morning_affirmation', 'not specified yet')}. 
-                Generate a natural follow-up question asking when they'd like to plan their day. Reference their morning time and suggest a logical time after. 
-                Start with 📝 and keep it conversational.""",
-                
-                "midday_motivation": f"""The user plans their day at {user_preferences.get('day_planning', 'not specified yet')}. 
-                Generate a question asking when they'd like a midday boost. Reference their morning schedule and suggest a natural lunch-time slot. 
-                Start with ☀️ and make it personal.""",
-                
-                "evening_winddown": f"""The user gets midday motivation at {user_preferences.get('midday_affirmation', 'not specified yet')}. 
-                Generate a question asking when they'd like an evening wind-down message. Reference their day flow and suggest early evening. 
-                Start with 🌅 and keep it warm.""",
-                
-                "progress_checkin": f"""The user wants evening wind-down at {user_preferences.get('evening_affirmation', 'not specified yet')}. 
-                Generate a question asking when they'd like a progress check-in. Reference their evening time and suggest slightly later. 
+                "progress_checkin": f"""The user plans their day at {user_preferences.get('day_planning', 'not specified yet')}. 
+                Generate a question asking when they'd like a daily accountability check-in. Reference their planning time and suggest a logical time later in the day. 
                 Start with 💪 and make it encouraging.""",
                 
-                "bedtime_gratitude": f"""The user wants progress check-ins at {user_preferences.get('accountability_checkin', 'not specified yet')}. 
-                Generate a question asking about their bedtime for gratitude messages. Reference their evening schedule and suggest before sleep. 
+                "bedtime_gratitude": f"""The user has accountability check-ins at {user_preferences.get('accountability_checkin', 'not specified yet')}. 
+                Generate a question asking about their bedtime for gratitude messages. Reference their daily schedule and suggest before sleep. 
                 Start with 🌙 and make it soothing.""",
                 
                 "weekly_reflection": f"""The user goes to bed around {user_preferences.get('evening_gratitude', 'not specified yet')}. 
@@ -833,10 +805,7 @@ class OnboardingService:
             logger.error(f"Error generating personalized question: {e}")
             # Fallback to context-appropriate question
             fallback_questions = {
-                "morning_affirmation": "⏰ What time would you like your morning affirmation?",
                 "day_planning": "📝 When would you like to plan your day?",
-                "midday_motivation": "☀️ When would you like a midday motivation boost?",
-                "evening_winddown": "🌅 What time would you like your evening wind-down message?",
                 "progress_checkin": "💪 When should I check in about your daily progress?",
                 "bedtime_gratitude": "🌙 What time do you usually go to bed?",
                 "weekly_reflection": "🗓️ Which day and time would you like your weekly reflection?"
@@ -1085,10 +1054,7 @@ class OnboardingService:
         try:
             # Map schedule keys to user-friendly activity descriptions
             activity_descriptions = {
-                'morning_affirmation': 'morning affirmation',
                 'day_planning': 'daily planning session',
-                'midday_affirmation': 'midday energy boost',
-                'evening_affirmation': 'evening wind-down',
                 'accountability_checkin': 'daily progress check-in',
                 'evening_gratitude': 'bedtime gratitude practice',
                 'weekly_reflection': 'weekly reflection'
@@ -1146,25 +1112,10 @@ class OnboardingService:
             
             # Fallback to varied static responses (better than single static response)
             fallback_acknowledgments = {
-                'morning_affirmation': [
-                    f"Perfect! I'll send your morning motivation at {formatted_time}.",
-                    f"Awesome! Your day will start strong with an affirmation at {formatted_time}.",
-                    f"Love it! Morning inspiration coming your way at {formatted_time}."
-                ],
                 'day_planning': [
                     f"Great choice! Daily planning at {formatted_time} will set you up for success.",
                     f"Perfect timing! I'll help you organize your day at {formatted_time}.",
                     f"Excellent! Planning at {formatted_time} will keep you on track."
-                ],
-                'midday_affirmation': [
-                    f"Perfect! A midday boost at {formatted_time} will keep your energy up.",
-                    f"Great timing! I'll send motivation at {formatted_time} to beat the afternoon slump.",
-                    f"Awesome! Your {formatted_time} energy boost will power your afternoon."
-                ],
-                'evening_affirmation': [
-                    f"Wonderful! Evening relaxation at {formatted_time} sounds perfect.",
-                    f"Great choice! I'll help you unwind at {formatted_time}.",
-                    f"Perfect! Your evening wind-down at {formatted_time} will help you relax."
                 ],
                 'accountability_checkin': [
                     f"Excellent! I'll check in on your progress at {formatted_time}.",
@@ -1180,6 +1131,11 @@ class OnboardingService:
                     f"Perfect! Weekly reflection at {formatted_time} will help you grow.",
                     f"Excellent! I'll help you review your week at {formatted_time}.",
                     f"Great timing! Weekly check-in at {formatted_time} keeps you progressing."
+                ],
+                'current_timezone': [
+                    f"Perfect! I've set your timezone to {formatted_time} for perfectly timed messages.",
+                    f"Excellent! Now I can send messages at the right time in {formatted_time}.",
+                    f"Great! Your timezone {formatted_time} is all set for optimal message timing."
                 ]
             }
             
