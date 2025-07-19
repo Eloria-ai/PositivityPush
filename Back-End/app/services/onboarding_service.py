@@ -1253,10 +1253,11 @@ class OnboardingService:
                         hour = int(time_str.split(':')[0])
                         minute = time_str.split(':')[1]
                         
-                        # For weekly reflection, ask for clarification if AM/PM is ambiguous (1-11 without AM/PM)
+                        # For weekly reflection, default to AM for ambiguous times (1-11 without AM/PM)
+                        # Most people do weekly reflections in the morning anyway
                         if am_pm is None and 1 <= hour <= 11:
-                            logger.debug(f"Weekly reflection time ambiguous - need AM/PM clarification for {hour}:00")
-                            return None, None  # triggers clarification message asking for AM/PM
+                            logger.debug(f"Weekly reflection time defaulting to AM: {hour}:00 → {hour:02d}:{minute}")
+                            am_pm = "am"  # Default to AM for weekly reflections
                         
                         # Convert to 24-hour format if AM/PM was specified
                         if am_pm == "pm" and 1 <= hour <= 11:

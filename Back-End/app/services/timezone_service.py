@@ -25,17 +25,58 @@ class TimezoneService:
         
     def extract_timezone(self, text: str) -> Optional[str]:
         """
-        Pull the first valid IANA timezone (Region/City) from natural language text.
+        Pull the first valid IANA timezone from natural language text.
+        Supports both "Region/City" format and city-only inputs.
         
         Args:
-            text: User input like "I'm in London now" or "Africa/Casablanca"
+            text: User input like "I'm in London now", "Amsterdam", or "Africa/Casablanca"
             
         Returns:
             Valid IANA timezone string or None if none found
         """
+        # First try to find Region/City format
         m = IANA_RE.search(text)
         if m and m.group(1) in available_timezones():
             return m.group(1)
+        
+        # If not found, try city-only mappings
+        return self._map_city_to_timezone(text)
+    
+    def _map_city_to_timezone(self, text: str) -> Optional[str]:
+        """
+        Accept inputs like "Amsterdam" or "new york" and
+        return a matching Region/City IANA timezone string.
+
+        Strategy:
+        1. Normalise the city name (lower-case, strip punctuation/whitespace).
+        2. Scan all available IANA zones; if the trailing part of the zone
+           matches the city token (case-insensitive, '_' and '-' treated as spaces),
+           return that zone.
+        3. Fallback to a small manual map for ambiguous cases (e.g. "new york" → "America/New_York").
+        """
+        city_token = re.sub(r'[^a-z]', '', text.lower())
+
+        # fast manual overrides for common cities
+        manual = {
+            "amsterdam": "Europe/Amsterdam",
+            "london": "Europe/London",
+            "paris": "Europe/Paris",
+            "cairo": "Africa/Cairo",
+            "nairobi": "Africa/Nairobi",
+            "newyork": "America/New_York",
+            "losangeles": "America/Los_Angeles",
+            "sydney": "Australia/Sydney",
+            "tokyo": "Asia/Tokyo",
+        }
+        if city_token in manual:
+            return manual[city_token]
+
+        # brute-force search through IANA list
+        for zone in available_timezones():
+            city_part = zone.split('/')[-1].lower().replace('_', '').replace('-', '')
+            if city_part == city_token:
+                return zone
+
         return None
         
     async def detect_timezone_from_ip(self, ip_address: str) -> Optional[str]:

@@ -262,33 +262,12 @@ async def handle_coaching_message_with_subscription(
             )
             return
         
-        # Check for timezone update command (fallback)
+        # Check for timezone update command - privacy-first approach
         if message_text.lower().strip() in ["update timezone", "timezone", "change timezone", "fix timezone"]:
-            if client_ip:
-                new_timezone = await timezone_service.detect_timezone_from_ip(client_ip)
-                if new_timezone:
-                    await supabase_service.update_subscription(
-                        subscription["id"], 
-                        {
-                            'current_timezone': new_timezone,
-                            'timezone_updated_at': datetime.utcnow().isoformat()
-                        }
-                    )
-                    await whatsapp_service.send_message(
-                        wa_id,
-                        f"🌍 Perfect! I've updated your timezone to {new_timezone}. "
-                        f"Your scheduled messages will now be sent at the right times for your current location!"
-                    )
-                else:
-                    await whatsapp_service.send_message(
-                        wa_id,
-                        "❌ I couldn't detect your timezone. Please try again or contact support."
-                    )
-            else:
-                await whatsapp_service.send_message(
-                    wa_id,
-                    "❌ I need your location data to update your timezone. Please try again."
-                )
+            await whatsapp_service.send_message(
+                wa_id,
+                "🌍 I'd love to update your timezone! Please tell me your location like 'I'm in Amsterdam' or 'Europe/London'."
+            )
             return
         
         # Check if user is in onboarding process
