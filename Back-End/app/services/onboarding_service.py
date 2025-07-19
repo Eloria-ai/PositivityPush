@@ -21,10 +21,8 @@ logger = logging.getLogger(__name__)
 class OnboardingStep(Enum):
     """Steps in the onboarding conversation"""
     START = "start"
-    MORNING_AFFIRMATION = "morning_affirmation" 
+    # DEPRECATED: MORNING_AFFIRMATION, MIDDAY_AFFIRMATION, EVENING_AFFIRMATION - now use fixed times (08:00, 12:00, 16:00)
     DAY_PLANNING = "day_planning"
-    MIDDAY_AFFIRMATION = "midday_affirmation"
-    EVENING_AFFIRMATION = "evening_affirmation"
     ACCOUNTABILITY_CHECKIN = "accountability_checkin"
     SLEEP_TIME = "sleep_time"
     WEEKLY_REFLECTION = "weekly_reflection"
@@ -43,13 +41,10 @@ class OnboardingService:
         self.openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = settings.OPENAI_MODEL
         
-        # Conversation flow mapping
+        # Conversation flow mapping - affirmation times are now fixed (08:00, 12:00, 16:00)
         self.step_flow = {
-            OnboardingStep.START: OnboardingStep.MORNING_AFFIRMATION,
-            OnboardingStep.MORNING_AFFIRMATION: OnboardingStep.DAY_PLANNING,
-            OnboardingStep.DAY_PLANNING: OnboardingStep.MIDDAY_AFFIRMATION,
-            OnboardingStep.MIDDAY_AFFIRMATION: OnboardingStep.EVENING_AFFIRMATION,
-            OnboardingStep.EVENING_AFFIRMATION: OnboardingStep.ACCOUNTABILITY_CHECKIN,
+            OnboardingStep.START: OnboardingStep.DAY_PLANNING,
+            OnboardingStep.DAY_PLANNING: OnboardingStep.ACCOUNTABILITY_CHECKIN,
             OnboardingStep.ACCOUNTABILITY_CHECKIN: OnboardingStep.SLEEP_TIME,
             OnboardingStep.SLEEP_TIME: OnboardingStep.WEEKLY_REFLECTION,
             OnboardingStep.WEEKLY_REFLECTION: OnboardingStep.TIMEZONE_LOCATION,
@@ -58,11 +53,8 @@ class OnboardingService:
         
         # Question contexts for dynamic LLM generation
         self.question_contexts = {
-            OnboardingStep.START: {"type": "morning_affirmation", "emoji": "⏰"},
-            OnboardingStep.MORNING_AFFIRMATION: {"type": "day_planning", "emoji": "📝"}, 
-            OnboardingStep.DAY_PLANNING: {"type": "midday_motivation", "emoji": "☀️"},
-            OnboardingStep.MIDDAY_AFFIRMATION: {"type": "evening_winddown", "emoji": "🌅"},
-            OnboardingStep.EVENING_AFFIRMATION: {"type": "progress_checkin", "emoji": "💪"},
+            OnboardingStep.START: {"type": "day_planning", "emoji": "📝"},
+            OnboardingStep.DAY_PLANNING: {"type": "progress_checkin", "emoji": "💪"},
             OnboardingStep.ACCOUNTABILITY_CHECKIN: {"type": "bedtime_gratitude", "emoji": "🌙"},
             OnboardingStep.SLEEP_TIME: {"type": "weekly_reflection", "emoji": "🗓️"},
             OnboardingStep.TIMEZONE_LOCATION: {"type": "timezone_location", "emoji": "🌍"}
@@ -70,11 +62,8 @@ class OnboardingService:
         
         # Clarification messages
         self.clarifications = {
-            OnboardingStep.START: "Please enter a valid time like '7:00 AM' or '7 morning'",
-            OnboardingStep.MORNING_AFFIRMATION: "Please enter a valid time like '7:00 AM' or '07:30'",
+            OnboardingStep.START: "Please enter a valid time like '8:00 AM' or '8 morning'",
             OnboardingStep.DAY_PLANNING: "Please enter a valid time like '8:00 AM' or '08:30'",
-            OnboardingStep.MIDDAY_AFFIRMATION: "Please enter a valid time like '12:00 PM' or '13:00'",
-            OnboardingStep.EVENING_AFFIRMATION: "Please enter a valid time like '6:00 PM' or '18:00'",
             OnboardingStep.ACCOUNTABILITY_CHECKIN: "Please enter a valid time like '7:00 PM' or '19:00'",
             OnboardingStep.SLEEP_TIME: "Please enter a valid time like '9:00 PM' or '21:30'",
             OnboardingStep.WEEKLY_REFLECTION: "Please enter day and time like 'Sunday 10:00 AM' or 'Monday 9:00'",
@@ -83,11 +72,8 @@ class OnboardingService:
         
         # Preference keys for database storage
         self.preference_keys = {
-            OnboardingStep.START: "morning_affirmation",  # START question asks for morning time
-            OnboardingStep.MORNING_AFFIRMATION: "morning_affirmation",
+            OnboardingStep.START: "day_planning",  # START question asks for day planning time
             OnboardingStep.DAY_PLANNING: "day_planning",
-            OnboardingStep.MIDDAY_AFFIRMATION: "midday_affirmation",
-            OnboardingStep.EVENING_AFFIRMATION: "evening_affirmation",
             OnboardingStep.ACCOUNTABILITY_CHECKIN: "accountability_checkin",
             OnboardingStep.SLEEP_TIME: "evening_gratitude",  # Gratitude before sleep
             OnboardingStep.WEEKLY_REFLECTION: "weekly_reflection",
@@ -95,6 +81,23 @@ class OnboardingService:
         }
     
     # ==================== CORE ASYNC METHODS ====================
+    
+    async def set_default_affirmation_times(self, user_id: str) -> None:
+        """
+        Write the fixed affirmation schedule (08:00, 12:00, 16:00) to the subscription.
+        """
+        try:
+            await self.supabase.update_subscription(
+                user_id,
+                {
+                    "morning_positivity": "08:00",
+                    "midday_positivity": "12:00",
+                    "afternoon_positivity": "16:00",
+                },
+            )
+            logger.info(f"Default affirmation times set for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error setting default affirmation times for {user_id}: {e}")
     
     async def process_webhook_message(self, user_id: str, wa_id: str, message: str) -> Dict[str, Any]:
         """
@@ -156,6 +159,9 @@ class OnboardingService:
         try:
             # Clear default schedule preferences to ensure clean onboarding
             await self.clear_default_schedule_preferences(user_id)
+            
+            # Set fixed affirmation times (08:00, 12:00, 16:00)
+            await self.set_default_affirmation_times(user_id)
             
             # Set initial state to START step
             await self.supabase.set_preference_value(user_id, "onboarding_step", OnboardingStep.START.value)
@@ -361,13 +367,10 @@ class OnboardingService:
         return None
     
     async def clear_default_schedule_preferences(self, user_id: str):
-        """Clear default schedule preferences to ensure clean onboarding"""
+        """Clear default schedule preferences to ensure clean onboarding (affirmation times are now fixed)"""
         try:
             schedule_keys = [
-                'morning_affirmation',
                 'day_planning', 
-                'midday_affirmation',
-                'evening_affirmation',
                 'accountability_checkin',
                 'evening_gratitude',
                 'weekly_reflection'
@@ -383,10 +386,7 @@ class OnboardingService:
     def get_context_step_for_key(self, key: str) -> OnboardingStep:
         """Map preference key to OnboardingStep for context-aware parsing"""
         key_to_step = {
-            'morning_affirmation': OnboardingStep.MORNING_AFFIRMATION,
             'day_planning': OnboardingStep.DAY_PLANNING,
-            'midday_affirmation': OnboardingStep.MIDDAY_AFFIRMATION,
-            'evening_affirmation': OnboardingStep.EVENING_AFFIRMATION,
             'accountability_checkin': OnboardingStep.ACCOUNTABILITY_CHECKIN,
             'evening_gratitude': OnboardingStep.SLEEP_TIME,
             'weekly_reflection': OnboardingStep.WEEKLY_REFLECTION
@@ -396,9 +396,8 @@ class OnboardingService:
     async def generate_natural_response(self, key: str, value: str, preferences: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         """Generate natural response after successfully extracting time"""
         try:
-            # Check if we have all required items
-            all_items = ['morning_affirmation', 'day_planning', 'midday_affirmation', 
-                        'evening_affirmation', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection']
+            # Check if we have all required items (affirmation times are now fixed)
+            all_items = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection']
             
             # Update preferences with new value
             preferences[key] = value
@@ -406,7 +405,7 @@ class OnboardingService:
             # Count completed items
             completed_count = sum(1 for item in all_items if preferences.get(item))
             
-            if completed_count >= 7:
+            if completed_count >= 4:
                 return {
                     "completed": True,
                     "message": self.get_completion_message()
@@ -891,8 +890,7 @@ class OnboardingService:
         Process user response for the current state using OpenAI for natural language understanding
         Returns: (is_valid, parsed_value)
         """        
-        if state in [OnboardingStep.START, OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING,
-                     OnboardingStep.MIDDAY_AFFIRMATION, OnboardingStep.EVENING_AFFIRMATION,
+        if state in [OnboardingStep.START, OnboardingStep.DAY_PLANNING,
                      OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
             
             # Handle confirmation responses - ask for clarification
@@ -984,7 +982,7 @@ class OnboardingService:
             minute = int(match.group(2))
             
             # Use context for AM/PM determination
-            if context_step in [OnboardingStep.EVENING_AFFIRMATION, OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
+            if context_step in [OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
                 if 1 <= hour <= 11:  # Assume PM for evening context
                     hour += 12
             
@@ -1011,18 +1009,14 @@ class OnboardingService:
             
             # For ambiguous hours (1-12), use context
             if 1 <= hour <= 12:
-                if context_step in [OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING]:
+                if context_step == OnboardingStep.DAY_PLANNING:
                     # Morning context - assume AM
                     return f"{hour:02d}:00"
-                elif context_step in [OnboardingStep.EVENING_AFFIRMATION, OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
+                elif context_step in [OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
                     # Evening context - assume PM
                     if hour != 12:
                         hour += 12
                     return f"{hour:02d}:00"
-                elif context_step == OnboardingStep.MIDDAY_AFFIRMATION:
-                    # Midday context - 12-3 PM range
-                    if hour <= 3:
-                        hour += 12
                     return f"{hour:02d}:00"
             
             # Default to AM for ambiguous cases
@@ -1044,12 +1038,10 @@ class OnboardingService:
             if context_step:
                 if context_step == OnboardingStep.SLEEP_TIME:
                     context_info = "This is for bedtime/sleep, so 11 likely means 11 PM (23:00)"
-                elif context_step in [OnboardingStep.START, OnboardingStep.MORNING_AFFIRMATION, OnboardingStep.DAY_PLANNING]:
+                elif context_step in [OnboardingStep.START, OnboardingStep.DAY_PLANNING]:
                     context_info = "This is for morning activities, so times are likely AM (8 = 08:00)"
-                elif context_step in [OnboardingStep.EVENING_AFFIRMATION, OnboardingStep.ACCOUNTABILITY_CHECKIN]:
+                elif context_step == OnboardingStep.ACCOUNTABILITY_CHECKIN:
                     context_info = "This is for evening activities, so times are likely PM (7 = 19:00)"
-                elif context_step == OnboardingStep.MIDDAY_AFFIRMATION:
-                    context_info = "This is for midday/lunch time, so 13 = 13:00 (1 PM), 1 = 13:00"
             
             prompt = f"""
             Parse this user input into EXACT 24-hour time format (HH:MM).

@@ -36,19 +36,20 @@ CREATE TABLE IF NOT EXISTS subscribers (
     timezone_updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), -- When timezone was last updated
     client_ip VARCHAR(45), -- IPv6 max length, for IP-based timezone detection fallback
     
-    -- User Scheduling Preferences
+    -- Fixed Affirmation Times (no longer customizable)
+    morning_positivity VARCHAR(5) DEFAULT '08:00', -- Fixed morning affirmation time
+    midday_positivity VARCHAR(5) DEFAULT '12:00', -- Fixed midday affirmation time  
+    afternoon_positivity VARCHAR(5) DEFAULT '16:00', -- Fixed afternoon affirmation time
+    
+    -- User Scheduling Preferences (only personalized times)
     preferences JSONB DEFAULT '{
-        "morning_affirmation": "07:00",
         "day_planning": "08:00", 
-        "midday_affirmation": "12:00",
-        "evening_affirmation": "18:00",
         "accountability_checkin": "19:00",
         "evening_gratitude": "21:00",
         "weekly_reflection": {
             "day": "sunday",
             "time": "10:00"
         },
-        "timezone": "UTC",
         "onboarding_completed": false
     }',
     
@@ -196,3 +197,38 @@ COMMENT ON COLUMN subscribers.timezone IS 'Original timezone from onboarding (ke
 UPDATE subscribers 
 SET current_timezone = COALESCE(timezone, 'UTC')
 WHERE current_timezone IS NULL OR current_timezone = 'UTC';
+
+-- Migration for positivity columns (safe to run multiple times)
+-- Add columns if they don't exist (for existing databases)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscribers' AND column_name = 'morning_positivity') THEN
+        ALTER TABLE subscribers ADD COLUMN morning_positivity VARCHAR(5) DEFAULT '08:00';
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscribers' AND column_name = 'midday_positivity') THEN
+        ALTER TABLE subscribers ADD COLUMN midday_positivity VARCHAR(5) DEFAULT '12:00';
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscribers' AND column_name = 'afternoon_positivity') THEN
+        ALTER TABLE subscribers ADD COLUMN afternoon_positivity VARCHAR(5) DEFAULT '16:00';
+    END IF;
+END $$;
+
+-- Back-fill existing rows with default times
+UPDATE subscribers
+SET
+  morning_positivity = COALESCE(morning_positivity, '08:00'),
+  midday_positivity = COALESCE(midday_positivity, '12:00'),
+  afternoon_positivity = COALESCE(afternoon_positivity, '16:00')
+WHERE morning_positivity IS NULL OR midday_positivity IS NULL OR afternoon_positivity IS NULL;
+
+-- Clean up old affirmation keys from preferences JSON (optional cleanup)
+UPDATE subscribers
+SET preferences = preferences 
+    - 'morning_affirmation'
+    - 'midday_affirmation' 
+    - 'evening_affirmation'
+WHERE preferences ? 'morning_affirmation' 
+   OR preferences ? 'midday_affirmation'
+   OR preferences ? 'evening_affirmation';

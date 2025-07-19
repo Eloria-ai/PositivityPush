@@ -136,25 +136,25 @@ celery_app.conf.beat_schedule = {
         'kwargs': {'timezone': 'Europe/Paris'}
     },
     
-    # Evening affirmations (6 PM in various timezones)
+    # Evening affirmations (4 PM in various timezones)
     'send-evening-affirmation-utc': {
         'task': 'worker.tasks.daily_messages.send_evening_affirmation',
-        'schedule': crontab(hour=18, minute=0),
+        'schedule': crontab(hour=16, minute=0),
         'kwargs': {'timezone': 'UTC'}
     },
     'send-evening-affirmation-est': {
         'task': 'worker.tasks.daily_messages.send_evening_affirmation',
-        'schedule': crontab(hour=23, minute=0),  # 6 PM EST = 23:00 UTC
+        'schedule': crontab(hour=21, minute=0),  # 4 PM EST = 21:00 UTC
         'kwargs': {'timezone': 'America/New_York'}
     },
     'send-evening-affirmation-pst': {
         'task': 'worker.tasks.daily_messages.send_evening_affirmation',
-        'schedule': crontab(hour=2, minute=0),  # 6 PM PST = 02:00 UTC next day
+        'schedule': crontab(hour=0, minute=0),  # 4 PM PST = 00:00 UTC next day
         'kwargs': {'timezone': 'America/Los_Angeles'}
     },
     'send-evening-affirmation-cet': {
         'task': 'worker.tasks.daily_messages.send_evening_affirmation',
-        'schedule': crontab(hour=17, minute=0),  # 6 PM CET = 17:00 UTC
+        'schedule': crontab(hour=15, minute=0),  # 4 PM CET = 15:00 UTC
         'kwargs': {'timezone': 'Europe/Paris'}
     },
     
