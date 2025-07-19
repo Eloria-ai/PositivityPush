@@ -118,11 +118,8 @@ class OnboardingService:
                 logger.info(f"Resetting onboarding for user {user_id}")
                 await self.supabase.set_preference_value(user_id, "onboarding_completed", False)
                 await self.supabase.set_preference_value(user_id, "onboarding_step", "start")
-                # Clear existing preferences
-                await self.supabase.set_preference_value(user_id, "morning_affirmation", None)
+                # Clear existing preferences (only personalized times, not fixed affirmation times)
                 await self.supabase.set_preference_value(user_id, "day_planning", None)
-                await self.supabase.set_preference_value(user_id, "midday_affirmation", None)
-                await self.supabase.set_preference_value(user_id, "evening_affirmation", None)
                 await self.supabase.set_preference_value(user_id, "accountability_checkin", None)
                 await self.supabase.set_preference_value(user_id, "evening_gratitude", None)
                 await self.supabase.set_preference_value(user_id, "weekly_reflection", None)
@@ -271,10 +268,7 @@ class OnboardingService:
             if current_step and current_step != 'start':
                 # Map step to preference key
                 step_to_key = {
-                    'morning_affirmation': 'morning_affirmation',
                     'day_planning': 'day_planning',
-                    'midday_affirmation': 'midday_affirmation',
-                    'evening_affirmation': 'evening_affirmation',
                     'accountability_checkin': 'accountability_checkin',
                     'evening_gratitude': 'evening_gratitude',
                     'weekly_reflection': 'weekly_reflection',
@@ -507,10 +501,7 @@ class OnboardingService:
         try:
             # Find the next missing preference
             questions_mapping = [
-                ('morning_affirmation', "What time do you usually wake up?"),
                 ('day_planning', "When do you like to plan your day?"),
-                ('midday_affirmation', "What time would you like a midday boost?"),
-                ('evening_affirmation', "When do you prefer to wind down in the evening?"),
                 ('accountability_checkin', "What time should I check in on your daily progress?"),
                 ('evening_gratitude', "What time do you usually go to bed?"),
                 ('weekly_reflection', "Which day and time would you like your weekly reflection?")
@@ -638,10 +629,7 @@ class OnboardingService:
     async def get_next_missing_key(self, preferences: Dict[str, Any]) -> Optional[str]:
         """Get the next missing preference key"""
         all_keys = [
-            'morning_affirmation',
             'day_planning',
-            'midday_affirmation',
-            'evening_affirmation',
             'accountability_checkin',
             'evening_gratitude',
             'weekly_reflection'
@@ -1016,7 +1004,6 @@ class OnboardingService:
                     # Evening context - assume PM
                     if hour != 12:
                         hour += 12
-                    return f"{hour:02d}:00"
                     return f"{hour:02d}:00"
             
             # Default to AM for ambiguous cases
