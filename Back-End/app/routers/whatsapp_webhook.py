@@ -306,14 +306,10 @@ async def handle_coaching_message_with_subscription(
                 from worker.tasks.onboarding_tasks import send_onboarding_response
                 send_onboarding_response.delay(subscription["id"], wa_id, response_message)
             
-            # Check if onboarding was completed in this interaction
+            # Onboarding completion is now handled internally by OnboardingService
+            # No need for external completion logic - service manages its own state
             if onboarding_result.get("completed"):
-                logger.info(f"🎉 Onboarding completed for user {subscription['id']}")
-                # Mark onboarding as completed in database
-                await supabase_service.mark_onboarding_completed(subscription["id"])
-                # Clear onboarding step
-                await supabase_service.set_preference_value(subscription["id"], "onboarding_step", None)
-                logger.info(f"✅ Database updated: onboarding_completed = True for user {subscription['id']}")
+                logger.info(f"🎉 Onboarding completed for user {subscription['id']} (handled internally)")
             
             return
         

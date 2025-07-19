@@ -66,7 +66,7 @@ class OnboardingService:
             OnboardingStep.DAY_PLANNING: "Please enter a valid time like '8:00 AM' or '08:30'",
             OnboardingStep.ACCOUNTABILITY_CHECKIN: "Please enter a valid time like '7:00 PM' or '19:00'",
             OnboardingStep.SLEEP_TIME: "Please enter a valid time like '9:00 PM' or '21:30'",
-            OnboardingStep.WEEKLY_REFLECTION: "Please enter day and time like 'Sunday 10:00 AM' or 'Monday 9:00'",
+            OnboardingStep.WEEKLY_REFLECTION: "Please specify AM or PM! For example: 'Sunday 11:00 AM' or 'Sunday 11:00 PM'",
             OnboardingStep.TIMEZONE_LOCATION: "🕒 We respect your privacy and never track your location.\nWhat timezone are you in? (e.g. Africa/Casablanca or Europe/Amsterdam)\nIf you move later, just tell me—like 'I'm in London now'—and I'll adjust automatically."
         }
         
@@ -160,7 +160,8 @@ class OnboardingService:
             # Set fixed affirmation times (08:00, 12:00, 16:00)
             await self.set_default_affirmation_times(user_id)
             
-            # Set initial state to START step
+            # Reset onboarding completion status and set initial step
+            await self.supabase.set_preference_value(user_id, "onboarding_completed", False)
             await self.supabase.set_preference_value(user_id, "onboarding_step", OnboardingStep.START.value)
             
             # Generate conversational welcome
@@ -401,6 +402,12 @@ class OnboardingService:
             completed_count = sum(1 for item in all_items if preferences.get(item))
             
             if completed_count >= 5:
+                # Mark onboarding as completed in database immediately
+                await self.supabase.mark_onboarding_completed(user_id)
+                # Clear onboarding step since we're done
+                await self.supabase.set_preference_value(user_id, "onboarding_step", None)
+                logger.info(f"✅ Onboarding completed and persisted for user {user_id}")
+                
                 return {
                     "completed": True,
                     "message": self.get_completion_message()
@@ -409,7 +416,16 @@ class OnboardingService:
             # Update onboarding step for next question
             next_key = await self.get_next_missing_key(preferences)
             if next_key:
-                await self.supabase.set_preference_value(user_id, 'onboarding_step', next_key)
+                # Map preference key to proper onboarding step
+                key_to_step_mapping = {
+                    'day_planning': OnboardingStep.DAY_PLANNING.value,
+                    'accountability_checkin': OnboardingStep.ACCOUNTABILITY_CHECKIN.value,
+                    'evening_gratitude': OnboardingStep.SLEEP_TIME.value,
+                    'weekly_reflection': OnboardingStep.WEEKLY_REFLECTION.value,
+                    'current_timezone': OnboardingStep.TIMEZONE_LOCATION.value
+                }
+                next_step = key_to_step_mapping.get(next_key, next_key)
+                await self.supabase.set_preference_value(user_id, 'onboarding_step', next_step)
             
             # Generate next question
             next_question = await self.get_next_question(preferences)
@@ -436,6 +452,14 @@ class OnboardingService:
         """Generate natural clarifying question when no time is detected"""
         try:
             next_question = await self.get_next_question(preferences)
+            
+            # Check if this is a weekly reflection clarification that needs AM/PM
+            current_step = preferences.get('onboarding_step')
+            is_weekly_reflection = current_step == 'weekly_reflection'
+            contains_time_like_11 = any(word in message.lower() for word in ['11', 'eleven'])
+            
+            if is_weekly_reflection and contains_time_like_11:
+                return "I got the day and time, but could you clarify if that's 11:00 AM or 11:00 PM? For example, 'Sunday 11 AM' or 'Sunday 11 PM'."
             
             # Generate natural clarification using AI
             prompt = f"""
@@ -1229,10 +1253,10 @@ class OnboardingService:
                         hour = int(time_str.split(':')[0])
                         minute = time_str.split(':')[1]
                         
-                        # If hour is 1-11 and AM/PM was not specified, ask for clarification
+                        # For weekly reflection, ask for clarification if AM/PM is ambiguous (1-11 without AM/PM)
                         if am_pm is None and 1 <= hour <= 11:
-                            logger.debug("Weekly reflection time ambiguous—missing AM/PM")
-                            return None, None  # triggers clarification message
+                            logger.debug(f"Weekly reflection time ambiguous - need AM/PM clarification for {hour}:00")
+                            return None, None  # triggers clarification message asking for AM/PM
                         
                         # Convert to 24-hour format if AM/PM was specified
                         if am_pm == "pm" and 1 <= hour <= 11:
