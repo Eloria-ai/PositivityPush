@@ -235,7 +235,7 @@ class OnboardingService:
                 }
             else:
                 # No time found - generate a clarifying question
-                clarifying_response = await self.generate_clarifying_response(user_message, preferences)
+                clarifying_response = await self.generate_clarifying_response(user_message, preferences, user_id)
                 return {
                     "completed": False,
                     "message": clarifying_response
@@ -280,9 +280,21 @@ class OnboardingService:
                 if current_key:
                     logger.info(f"Processing response for current step: {current_step}")
                     if current_key == 'weekly_reflection':
-                        day, time = await self.parse_weekly_time(message)
-                        if day and time:
-                            return (current_key, {"day": day, "time": time})
+                        # Check if this is an AM/PM clarification response
+                        pending_weekly = preferences.get('pending_weekly_clarification')
+                        if pending_weekly and self.is_am_pm_clarification(message):
+                            # Combine pending input with AM/PM clarification
+                            combined_message = f"{pending_weekly} {message.strip()}"
+                            logger.info(f"Combining pending weekly clarification: '{pending_weekly}' + '{message}' = '{combined_message}'")
+                            day, time = await self.parse_weekly_time(combined_message)
+                            if day and time:
+                                # Clear the pending clarification
+                                await self.supabase.set_preference_value(user_id, "pending_weekly_clarification", None)
+                                return (current_key, {"day": day, "time": time})
+                        else:
+                            day, time = await self.parse_weekly_time(message)
+                            if day and time:
+                                return (current_key, {"day": day, "time": time})
                     elif current_key == 'current_timezone':
                         # Handle timezone extraction using the natural language parser
                         timezone_detected = self.timezone_service.extract_timezone(message)
@@ -448,7 +460,7 @@ class OnboardingService:
                 "message": "What's your next preferred time?"
             }
     
-    async def generate_clarifying_response(self, message: str, preferences: Dict[str, Any]) -> str:
+    async def generate_clarifying_response(self, message: str, preferences: Dict[str, Any], user_id: str = None) -> str:
         """Generate natural clarifying question when no time is detected"""
         try:
             next_question = await self.get_next_question(preferences)
@@ -457,12 +469,18 @@ class OnboardingService:
             current_step = preferences.get('onboarding_step')
             is_weekly_reflection = current_step == 'weekly_reflection'
             
-            # Check for any ambiguous time (1-12) in the message  
+            # Check for any ambiguous time (1-12) in the message with better punctuation handling
             ambiguous_times = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12',
                               'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
-            contains_ambiguous_time = any(word in message.lower().split() for word in ambiguous_times)
+            # Use regex to extract words, removing punctuation
+            words = re.findall(r'\w+', message.lower())
+            contains_ambiguous_time = any(word in ambiguous_times for word in words)
             
             if is_weekly_reflection and contains_ambiguous_time:
+                # Store the pending clarification for next message
+                if user_id:
+                    await self.supabase.set_preference_value(user_id, "pending_weekly_clarification", message.strip())
+                    logger.info(f"Stored pending weekly clarification: {message.strip()}")
                 return "I got the day and time, but could you clarify if that's AM or PM? For example, 'Sunday 10 AM' or 'Sunday 10 PM'."
             
             # Generate natural clarification using AI
@@ -534,14 +552,18 @@ class OnboardingService:
                 ('accountability_checkin', "What time should I check in on your daily progress?"),
                 ('evening_gratitude', "What time do you usually go to bed?"),
                 ('weekly_reflection', "Which day and time would you like your weekly reflection?"),
-                ('current_timezone', "What timezone are you in? (e.g. Africa/Casablanca or Europe/Amsterdam)")
+                ('current_timezone', "What's your location or timezone so I can send messages at the right time for you?")
             ]
             
             for key, default_question in questions_mapping:
                 if not preferences.get(key):
-                    # Try to generate a natural question
-                    natural_question = await self.generate_natural_question(key, default_question)
-                    return natural_question
+                    # For timezone, use a more direct approach to avoid AI confusion
+                    if key == 'current_timezone':
+                        return "Now, just to make sure I'm in sync with you, what time zone are you in?"
+                    else:
+                        # Try to generate a natural question for other keys
+                        natural_question = await self.generate_natural_question(key, default_question)
+                        return natural_question
             
             return "What other time preferences do you have?"
         except Exception as e:
@@ -861,6 +883,16 @@ class OnboardingService:
             "✨ *Let's make every day a little brighter together!*"
         )
     
+    def is_am_pm_clarification(self, message: str) -> bool:
+        """Check if message is just an AM/PM clarification response"""
+        cleaned = message.strip().lower()
+        # Match common AM/PM responses
+        am_pm_patterns = [
+            r'^am$', r'^pm$', r'^a\.?m\.?$', r'^p\.?m\.?$',
+            r'^morning$', r'^evening$', r'^afternoon$', r'^night$'
+        ]
+        return any(re.match(pattern, cleaned) for pattern in am_pm_patterns)
+
     def is_confirmation_response(self, user_input: str) -> bool:
         """Check if user is giving a confirmation response rather than a time"""
         confirmation_words = [
