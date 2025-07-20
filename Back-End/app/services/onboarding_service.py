@@ -280,21 +280,10 @@ class OnboardingService:
                 if current_key:
                     logger.info(f"Processing response for current step: {current_step}")
                     if current_key == 'weekly_reflection':
-                        # Check if this is an AM/PM clarification response
-                        pending_weekly = preferences.get('pending_weekly_clarification')
-                        if pending_weekly and self.is_am_pm_clarification(message):
-                            # Combine pending input with AM/PM clarification
-                            combined_message = f"{pending_weekly} {message.strip()}"
-                            logger.info(f"Combining pending weekly clarification: '{pending_weekly}' + '{message}' = '{combined_message}'")
-                            day, time = await self.parse_weekly_time(combined_message)
-                            if day and time:
-                                # Clear the pending clarification
-                                await self.supabase.set_preference_value(user_id, "pending_weekly_clarification", None)
-                                return (current_key, {"day": day, "time": time})
-                        else:
-                            day, time = await self.parse_weekly_time(message)
-                            if day and time:
-                                return (current_key, {"day": day, "time": time})
+                        # Simplified - let LLM handle all weekly reflection parsing
+                        day, time = await self.parse_weekly_time(message)
+                        if day and time:
+                            return (current_key, {"day": day, "time": time})
                     elif current_key == 'current_timezone':
                         # Handle timezone extraction using the natural language parser
                         timezone_detected = self.timezone_service.extract_timezone(message)
@@ -465,23 +454,8 @@ class OnboardingService:
         try:
             next_question = await self.get_next_question(preferences)
             
-            # Check if this is a weekly reflection clarification that needs AM/PM
-            current_step = preferences.get('onboarding_step')
-            is_weekly_reflection = current_step == 'weekly_reflection'
-            
-            # Check for any ambiguous time (1-12) in the message with better punctuation handling
-            ambiguous_times = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12',
-                              'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
-            # Use regex to extract words, removing punctuation
-            words = re.findall(r'\w+', message.lower())
-            contains_ambiguous_time = any(word in ambiguous_times for word in words)
-            
-            if is_weekly_reflection and contains_ambiguous_time:
-                # Store the pending clarification for next message
-                if user_id:
-                    await self.supabase.set_preference_value(user_id, "pending_weekly_clarification", message.strip())
-                    logger.info(f"Stored pending weekly clarification: {message.strip()}")
-                return "I got the day and time, but could you clarify if that's AM or PM? For example, 'Sunday 10 AM' or 'Sunday 10 PM'."
+            # Let the LLM handle any clarification naturally through conversation
+            # Remove rigid AM/PM detection - the AI can ask follow-up questions if needed
             
             # Generate natural clarification using AI
             prompt = f"""
@@ -883,16 +857,6 @@ class OnboardingService:
             "✨ *Let's make every day a little brighter together!*"
         )
     
-    def is_am_pm_clarification(self, message: str) -> bool:
-        """Check if message is just an AM/PM clarification response"""
-        cleaned = message.strip().lower()
-        # Match common AM/PM responses
-        am_pm_patterns = [
-            r'^am$', r'^pm$', r'^a\.?m\.?$', r'^p\.?m\.?$',
-            r'^morning$', r'^evening$', r'^afternoon$', r'^night$'
-        ]
-        return any(re.match(pattern, cleaned) for pattern in am_pm_patterns)
-
     def is_confirmation_response(self, user_input: str) -> bool:
         """Check if user is giving a confirmation response rather than a time"""
         confirmation_words = [
@@ -1233,24 +1197,23 @@ class OnboardingService:
             
             User input: "{message}"
             
-            STRICT PARSING RULES:
-            - "Sunday at 10" -> {{"day": "sunday", "time": "10:00", "am_pm": null}}
-            - "Sunday 11" -> {{"day": "sunday", "time": "11:00", "am_pm": null}}
-            - "Sunday 11 am" -> {{"day": "sunday", "time": "11:00", "am_pm": "am"}}
-            - "Monday 9am" -> {{"day": "monday", "time": "09:00", "am_pm": "am"}}
-            - "Friday evening 7" -> {{"day": "friday", "time": "19:00", "am_pm": "pm"}}
+            PARSING EXAMPLES:
+            - "Sunday at 10" -> {{"day": "sunday", "time": "10:00 AM"}}
+            - "Sunday 11" -> {{"day": "sunday", "time": "11:00 AM"}}  
+            - "Sunday 11 am" -> {{"day": "sunday", "time": "11:00 AM"}}
+            - "Monday 9pm" -> {{"day": "monday", "time": "09:00 PM"}}
+            - "Friday evening 7" -> {{"day": "friday", "time": "07:00 PM"}}
             
-            CLARIFICATION REQUIRED:
-            - Ambiguous times (1-12 without AM/PM) require clarification
-            - "10" triggers "10 AM or 10 PM?" prompt  
-            - "12" triggers "12 AM or 12 PM?" prompt
-            - "11 am" means "11:00" (11 AM) - no clarification needed
-            - Handle natural language like "Sunday at 11 am" or "Sunday 11 am"
+            RULES:
+            - Use standard 12-hour format with AM/PM
+            - If no AM/PM specified, assume AM for times 1-11, assume PM for evening context
+            - Handle natural language flexibly
+            - If user just says "AM" or "PM" alone, return null (incomplete)
             
             Valid days: monday, tuesday, wednesday, thursday, friday, saturday, sunday
             
-            Return JSON: {{"day": "dayname", "time": "HH:MM", "am_pm": "am"|"pm"|null}}
-            If parsing fails: {{"day": null, "time": null, "am_pm": null}}
+            Return JSON: {{"day": "dayname", "time": "HH:MM AM/PM"}}
+            If parsing fails: {{"day": null, "time": null}}
             
             Return ONLY the JSON object.
             """
@@ -1272,7 +1235,6 @@ class OnboardingService:
                     data = json.loads(result.strip())
                     day = data.get('day', '').lower()
                     time_str = data.get('time', '')
-                    am_pm = data.get('am_pm')
                     
                     # Handle null values from failed parsing
                     if not day or not time_str or day == 'null' or time_str == 'null':
@@ -1283,23 +1245,8 @@ class OnboardingService:
                     if day not in valid_days:
                         return None, None
                     
-                    # Validate time format
-                    if re.match(r'^[0-2][0-9]:[0-5][0-9]$', time_str):
-                        # Extract hour from time string for ambiguity check
-                        hour = int(time_str.split(':')[0])
-                        minute = time_str.split(':')[1]
-                        
-                        # For weekly reflection, require AM/PM clarification for ambiguous times (1-12 without AM/PM)
-                        if am_pm is None and 1 <= hour <= 12:
-                            logger.debug(f"Weekly reflection time ambiguous - requiring AM/PM clarification for {hour}:00")
-                            return None, None  # triggers clarification message
-                        
-                        # Convert to 24-hour format if AM/PM was specified
-                        if am_pm == "pm" and 1 <= hour <= 11:
-                            time_str = f"{hour+12:02d}:{minute}"
-                        elif am_pm == "am" and hour == 12:
-                            time_str = f"00:{minute}"
-                        
+                    # LLM should return time in "HH:MM AM/PM" format - just validate and store
+                    if time_str and ('AM' in time_str.upper() or 'PM' in time_str.upper() or ':' in time_str):
                         return day, time_str
                     
                 except json.JSONDecodeError:

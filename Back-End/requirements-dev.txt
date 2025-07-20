@@ -1,0 +1,23 @@
+# Development and Testing Dependencies for Positivity Push Backend
+
+# Core testing framework
+pytest>=7.4.0,<8.0.0
+pytest-asyncio>=0.21.0,<1.0.0
+pytest-cov>=4.1.0,<5.0.0
+pytest-mock>=3.11.0,<4.0.0
+
+# HTTP testing
+httpx>=0.24.0,<0.25.0
+requests-mock>=1.11.0,<2.0.0
+
+# Database testing
+pytest-postgresql>=5.0.0,<6.0.0
+
+# Code quality
+black>=23.0.0,<24.0.0
+flake8>=6.0.0,<7.0.0
+mypy>=1.5.0,<2.0.0
+
+# Development utilities
+python-dotenv>=1.0.0
+ipython>=8.0.0,<9.0.0

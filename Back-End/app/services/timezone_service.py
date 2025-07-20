@@ -48,7 +48,7 @@ class TimezoneService:
         # Extract words and check each one
         words = re.findall(r'[a-zA-Z]+', text.lower())
         
-        # fast manual overrides for common cities
+        # fast manual overrides for common cities (including multi-word cities)
         manual = {
             "amsterdam": "Europe/Amsterdam",
             "london": "Europe/London",
@@ -59,7 +59,9 @@ class TimezoneService:
             "cairo": "Africa/Cairo",
             "nairobi": "Africa/Nairobi",
             "newyork": "America/New_York",
+            "new york": "America/New_York",
             "losangeles": "America/Los_Angeles",
+            "los angeles": "America/Los_Angeles",
             "chicago": "America/Chicago",
             "denver": "America/Denver",
             "sydney": "Australia/Sydney",
@@ -70,6 +72,8 @@ class TimezoneService:
             "dubai": "Asia/Dubai",
             "mumbai": "Asia/Kolkata",
             "delhi": "Asia/Kolkata",
+            "san francisco": "America/Los_Angeles",
+            "sao paulo": "America/Sao_Paulo",
         }
         
         # Check each word against manual mapping
