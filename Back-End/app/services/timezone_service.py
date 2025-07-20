@@ -37,18 +37,17 @@ class TimezoneService:
     
     def _map_city_to_timezone(self, text: str) -> Optional[str]:
         """
-        Accept inputs like "Amsterdam" or "new york" and
+        Accept inputs like "Amsterdam" or "I am located in Amsterdam" and
         return a matching Region/City IANA timezone string.
 
         Strategy:
-        1. Normalise the city name (lower-case, strip punctuation/whitespace).
-        2. Scan all available IANA zones; if the trailing part of the zone
-           matches the city token (case-insensitive, '_' and '-' treated as spaces),
-           return that zone.
-        3. Fallback to a small manual map for ambiguous cases (e.g. "new york" → "America/New_York").
+        1. Extract individual words from the text
+        2. Check each word against our manual city mapping
+        3. Fallback to brute-force search through IANA zones
         """
-        city_token = re.sub(r'[^a-z]', '', text.lower())
-
+        # Extract words and check each one
+        words = re.findall(r'[a-zA-Z]+', text.lower())
+        
         # fast manual overrides for common cities
         manual = {
             "amsterdam": "Europe/Amsterdam",
@@ -72,13 +71,23 @@ class TimezoneService:
             "mumbai": "Asia/Kolkata",
             "delhi": "Asia/Kolkata",
         }
-        if city_token in manual:
-            return manual[city_token]
+        
+        # Check each word against manual mapping
+        for word in words:
+            if word in manual:
+                return manual[word]
+        
+        # Handle multi-word cities like "new york"
+        text_normalized = re.sub(r'[^a-z\s]', '', text.lower()).strip()
+        for city_phrase, timezone in manual.items():
+            if ' ' in city_phrase and city_phrase in text_normalized:
+                return timezone
 
-        # brute-force search through IANA list
-        for zone in available_timezones():
-            city_part = zone.split('/')[-1].lower().replace('_', '').replace('-', '')
-            if city_part == city_token:
-                return zone
+        # brute-force search through IANA list for each word
+        for word in words:
+            for zone in available_timezones():
+                city_part = zone.split('/')[-1].lower().replace('_', '').replace('-', '')
+                if city_part == word:
+                    return zone
 
         return None
