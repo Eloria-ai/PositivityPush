@@ -7,7 +7,6 @@ from fastapi import APIRouter, Request, HTTPException, Depends, status
 from fastapi.responses import JSONResponse
 import stripe
 import json
-import logging
 from typing import Dict, Any
 
 from app.config import settings
@@ -15,10 +14,10 @@ from app.deps import get_supabase_client, get_stripe_client
 from app.services.stripe_service import StripeService
 from app.services.supabase_client import SupabaseService
 from app.services.email_service import EmailService
+from app.logging_config import get_logger
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+logger = get_logger("app.webhooks.stripe")
 
 router = APIRouter()
 
@@ -85,10 +84,17 @@ async def stripe_webhook(
             await handle_subscription_cancelled(event['data']['object'], supabase_service)
             
         else:
-            logger.info(f"Unhandled event type: {event['type']}")
+            logger.info("stripe_webhook_unhandled", 
+                       event_type=event['type'],
+                       correlation_id=getattr(request.state, 'correlation_id', None))
     
     except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
+        logger.error("stripe_webhook_failed", 
+                    event_type=event.get('type'),
+                    event_id=event.get('id'),
+                    correlation_id=getattr(request.state, 'correlation_id', None),
+                    error=str(e),
+                    exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Webhook processing failed"
@@ -101,7 +107,9 @@ async def handle_checkout_completed(session: Dict[str, Any], supabase_service: S
     Handle successful checkout completion
     Creates subscription record in database
     """
-    logger.info(f"Processing checkout completion for session: {session['id']}")
+    logger.info("stripe_checkout_completed", 
+               session_id=session['id'],
+               customer_email=session.get('customer_details', {}).get('email'))
     
     # Extract customer information
     customer_email = session.get('customer_details', {}).get('email')

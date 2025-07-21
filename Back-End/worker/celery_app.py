@@ -6,10 +6,49 @@ Handles background tasks for daily messaging, weekly reports, and email notifica
 from celery import Celery
 from celery.schedules import crontab
 import os
+import sys
 from dotenv import load_dotenv
+
+# Configure structured logging for production observability
+try:
+    import structlog
+    import logging
+    
+    # Configure structlog with JSON output for log collectors
+    structlog.configure(
+        processors=[
+            structlog.processors.TimeStamper(fmt="iso", utc=True),
+            structlog.processors.add_log_level,
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer()
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
+    )
+    
+    logger = structlog.get_logger(__name__)
+    logger.info("structured_logging_enabled", service="celery_worker")
+    
+except ImportError:
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    logger.info("Using standard logging - install structlog for JSON output")
 
 # Load environment variables
 load_dotenv()
+
+# Redis client for idempotency
+try:
+    import redis
+    redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
+    # Test connection
+    redis_client.ping()
+    logger.info("redis_connection_established", url=os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+except Exception as e:
+    logger.warning("redis_connection_failed", error=str(e), message="Idempotency disabled")
+    redis_client = None
 
 # Create Celery app
 celery_app = Celery(

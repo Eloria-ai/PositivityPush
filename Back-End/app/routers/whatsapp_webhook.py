@@ -6,7 +6,6 @@ Handles incoming WhatsApp messages and AI coaching conversations.
 from fastapi import APIRouter, Request, HTTPException, Depends, status, Query
 from fastapi.responses import JSONResponse
 import json
-import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -17,10 +16,10 @@ from app.services.ai_coach import AICoachService
 from app.services.supabase_client import SupabaseService
 from app.services.onboarding_service import OnboardingService
 from app.services.timezone_service import TimezoneService
+from app.logging_config import get_logger
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+logger = get_logger("app.webhooks.whatsapp")
 
 router = APIRouter()
 
@@ -200,18 +199,37 @@ async def handle_activation_message(
         stored_client_ip = subscription.get("client_ip")
         client_ip = stored_client_ip if stored_client_ip else None
         
+        correlation_id = getattr(request.state, 'correlation_id', None)
+        
         if client_ip:
-            logger.info(f"Using stored client IP for timezone detection: {client_ip}")
+            logger.info("activation_using_stored_ip", 
+                       wa_id=wa_id,
+                       client_ip=client_ip,
+                       correlation_id=correlation_id)
         else:
-            logger.info(f"No client IP available - will fallback to UTC timezone detection")
+            logger.info("activation_no_ip_fallback", 
+                       wa_id=wa_id,
+                       correlation_id=correlation_id)
         
         from worker.tasks.onboarding_tasks import send_onboarding_welcome_flow
-        send_onboarding_welcome_flow.delay(subscription["id"], wa_id, client_ip)
+        send_onboarding_welcome_flow.delay(
+            subscription["id"], 
+            wa_id, 
+            client_ip,
+            correlation_id=correlation_id
+        )
         
-        logger.info(f"Successfully activated subscription and started onboarding for {wa_id}")
+        logger.info("subscription_activated_onboarding_started", 
+                   wa_id=wa_id,
+                   user_id=subscription["id"],
+                   correlation_id=correlation_id)
         
     except Exception as e:
-        logger.error(f"Error in activation: {e}")
+        logger.error("activation_error", 
+                    wa_id=wa_id,
+                    error=str(e),
+                    correlation_id=getattr(request.state, 'correlation_id', None),
+                    exc_info=True)
         await whatsapp_service.send_message(
             wa_id,
             "❌ Something went wrong during activation. Please contact support."
@@ -281,14 +299,24 @@ async def handle_coaching_message_with_subscription(
         # If in onboarding, enqueue response message and return
         if onboarding_result.get("is_onboarding"):
             response_message = onboarding_result.get("message")
+            correlation_id = getattr(request.state, 'correlation_id', None)
+            
             if response_message:
                 from worker.tasks.onboarding_tasks import send_onboarding_response
-                send_onboarding_response.delay(subscription["id"], wa_id, response_message)
+                send_onboarding_response.delay(
+                    subscription["id"], 
+                    wa_id, 
+                    response_message,
+                    correlation_id=correlation_id
+                )
             
             # Onboarding completion is now handled internally by OnboardingService
             # No need for external completion logic - service manages its own state
             if onboarding_result.get("completed"):
-                logger.info(f"🎉 Onboarding completed for user {subscription['id']} (handled internally)")
+                logger.info("onboarding_completed", 
+                           user_id=subscription['id'],
+                           wa_id=wa_id,
+                           correlation_id=correlation_id)
             
             return
         

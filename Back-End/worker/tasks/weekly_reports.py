@@ -5,7 +5,6 @@ Generates and sends personalized weekly reflection reports.
 
 from celery import shared_task
 from datetime import datetime, timedelta
-import logging
 import asyncio
 import sys
 import os
@@ -20,21 +19,30 @@ from services.email_service import EmailService
 from deps import get_supabase_client
 from config import settings
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Use structured logging
+try:
+    import structlog
+    logger = structlog.get_logger(__name__)
+except ImportError:
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
 
 @shared_task(bind=True, max_retries=3)
 def send_weekly_progress_reports(self):
     """
     Generate and send personalized weekly progress reports to all active users
     """
-    logger.info("Starting weekly progress reports generation")
+    logger.info("weekly_reports_start",
+               task_name="send_weekly_progress_reports")
     
     try:
         return asyncio.run(_send_weekly_progress_reports_async())
     except Exception as e:
-        logger.error(f"Error in weekly progress reports task: {e}")
+        logger.error("weekly_reports_task_error",
+                    error=str(e),
+                    retry_count=self.request.retries,
+                    exc_info=True)
         raise self.retry(exc=e, countdown=300)  # Retry after 5 minutes
 
 async def _send_weekly_progress_reports_async():
@@ -81,18 +89,26 @@ async def _send_weekly_progress_reports_async():
                         )
                         
                         sent_count += 1
-                        logger.info(f"Weekly report sent to user {subscriber['id']}")
+                        logger.info("weekly_report_sent",
+                                   user_id=subscriber['id'])
                     else:
                         error_count += 1
-                        logger.error(f"Failed to send weekly report to user {subscriber['id']}")
+                        logger.error("weekly_report_send_failed",
+                                    user_id=subscriber['id'])
             else:
-                logger.warning(f"No progress report generated for user {subscriber['id']}")
+                logger.warning("weekly_report_generation_failed",
+                              user_id=subscriber['id'])
             
         except Exception as e:
             error_count += 1
-            logger.error(f"Error processing user {subscriber.get('id', 'unknown')}: {e}")
+            logger.error("weekly_report_user_error",
+                        user_id=subscriber.get('id', 'unknown'),
+                        error=str(e),
+                        exc_info=True)
     
-    logger.info(f"Weekly progress reports complete. Sent: {sent_count}, Errors: {error_count}")
+    logger.info("weekly_reports_complete",
+               sent_count=sent_count,
+               error_count=error_count)
     return {"sent": sent_count, "errors": error_count}
 
 async def _generate_weekly_progress_report(
@@ -169,7 +185,10 @@ async def _generate_weekly_progress_report(
         return report
         
     except Exception as e:
-        logger.error(f"Error generating progress report for user {subscriber['id']}: {e}")
+        logger.error("weekly_report_generation_error",
+                    user_id=subscriber['id'],
+                    error=str(e),
+                    exc_info=True)
         return None
 
 async def _get_week_conversations(subscriber_id: str, supabase_service: SupabaseService) -> list:
@@ -192,7 +211,9 @@ async def _get_week_conversations(subscriber_id: str, supabase_service: Supabase
         return week_conversations
         
     except Exception as e:
-        logger.error(f"Error getting week conversations: {e}")
+        logger.error("week_conversations_error",
+                    error=str(e),
+                    exc_info=True)
         return []
 
 async def _analyze_week_conversations(conversations: list) -> str:
@@ -287,22 +308,29 @@ async def _store_weekly_progress_data(subscriber: dict, supabase_service: Supaba
         # Store in user_progress table
         await supabase_service.log_user_progress(subscriber['id'], progress_data)
         
-        logger.info(f"Stored weekly progress data for user {subscriber['id']}")
+        logger.info("weekly_progress_stored",
+                   user_id=subscriber['id'])
         
     except Exception as e:
-        logger.error(f"Error storing progress data: {e}")
+        logger.error("weekly_progress_storage_error",
+                    error=str(e),
+                    exc_info=True)
 
 @shared_task(bind=True, max_retries=2)
 def generate_monthly_insights(self):
     """
     Generate monthly insights and send summary reports
     """
-    logger.info("Starting monthly insights generation")
+    logger.info("monthly_insights_start",
+               task_name="generate_monthly_insights")
     
     try:
         return asyncio.run(_generate_monthly_insights_async())
     except Exception as e:
-        logger.error(f"Error in monthly insights task: {e}")
+        logger.error("monthly_insights_task_error",
+                    error=str(e),
+                    retry_count=self.request.retries,
+                    exc_info=True)
         raise self.retry(exc=e, countdown=600)  # Retry after 10 minutes
 
 async def _generate_monthly_insights_async():
@@ -332,10 +360,15 @@ async def _generate_monthly_insights_async():
             if len(monthly_conversations) >= 5:  # Only generate insights for engaged users
                 # Could implement detailed monthly analysis here
                 insights_generated += 1
-                logger.info(f"Generated monthly insights for user {subscriber['id']}")
+                logger.info("monthly_insights_generated",
+                           user_id=subscriber['id'])
         
         except Exception as e:
-            logger.error(f"Error generating insights for user {subscriber.get('id', 'unknown')}: {e}")
+            logger.error("monthly_insights_user_error",
+                        user_id=subscriber.get('id', 'unknown'),
+                        error=str(e),
+                        exc_info=True)
     
-    logger.info(f"Monthly insights complete. Generated: {insights_generated}")
+    logger.info("monthly_insights_complete",
+               insights_generated=insights_generated)
     return {"insights_generated": insights_generated}

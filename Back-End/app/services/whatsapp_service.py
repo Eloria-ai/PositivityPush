@@ -5,13 +5,14 @@ Handles Twilio WhatsApp API communication for sending messages.
 
 import httpx
 import json
-import logging
 from typing import Dict, Any, Optional
 import base64
 
 from app.config import settings
+from app.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+# Configure structured logging
+logger = get_logger("app.services.whatsapp")
 
 class WhatsAppService:
     """Service class for Twilio WhatsApp API operations"""
@@ -49,14 +50,22 @@ class WhatsAppService:
                 )
                 
                 if response.status_code in [200, 201]:
-                    logger.info(f"Message sent successfully to {to}")
+                    logger.info("whatsapp_message_sent",
+                               recipient=to,
+                               status_code=response.status_code)
                     return True
                 else:
-                    logger.error(f"Failed to send message: {response.status_code} - {response.text}")
+                    logger.error("whatsapp_message_failed",
+                               recipient=to,
+                               status_code=response.status_code,
+                               error_text=response.text)
                     return False
                     
         except Exception as e:
-            logger.error(f"Error sending WhatsApp message: {e}")
+            logger.error("whatsapp_message_exception",
+                        recipient=to,
+                        error=str(e),
+                        exc_info=True)
             return False
     
     async def send_template_message(
@@ -93,14 +102,23 @@ class WhatsAppService:
                 )
                 
                 if response.status_code == 200:
-                    logger.info(f"Template message sent successfully to {to}")
+                    logger.info("whatsapp_template_sent",
+                               recipient=to,
+                               template_name=template_name)
                     return True
                 else:
-                    logger.error(f"Failed to send template message: {response.text}")
+                    logger.error("whatsapp_template_failed",
+                               recipient=to,
+                               template_name=template_name,
+                               error_text=response.text)
                     return False
                     
         except Exception as e:
-            logger.error(f"Error sending WhatsApp template message: {e}")
+            logger.error("whatsapp_template_exception",
+                        recipient=to,
+                        template_name=template_name,
+                        error=str(e),
+                        exc_info=True)
             return False
     
     async def mark_message_as_read(self, message_id: str) -> bool:
@@ -122,7 +140,10 @@ class WhatsAppService:
                 return response.status_code == 200
                     
         except Exception as e:
-            logger.error(f"Error marking message as read: {e}")
+            logger.error("whatsapp_read_mark_exception",
+                        message_id=message_id,
+                        error=str(e),
+                        exc_info=True)
             return False
     
     async def send_reaction(self, message_id: str, emoji: str, to: str) -> bool:
@@ -149,5 +170,10 @@ class WhatsAppService:
                 return response.status_code == 200
                     
         except Exception as e:
-            logger.error(f"Error sending reaction: {e}")
+            logger.error("whatsapp_reaction_exception",
+                        message_id=message_id,
+                        recipient=to,
+                        emoji=emoji,
+                        error=str(e),
+                        exc_info=True)
             return False

@@ -116,15 +116,18 @@ class OnboardingService:
             # Reset onboarding for testing if user says "reset" or "restart"
             if message.lower().strip() in ["reset", "restart", "start over"]:
                 logger.info(f"Resetting onboarding for user {user_id}")
-                await self.supabase.set_preference_value(user_id, "onboarding_completed", False)
-                await self.supabase.set_preference_value(user_id, "onboarding_step", "start")
-                # Clear existing preferences (only personalized times, not fixed affirmation times)
-                await self.supabase.set_preference_value(user_id, "day_planning", None)
-                await self.supabase.set_preference_value(user_id, "accountability_checkin", None)
-                await self.supabase.set_preference_value(user_id, "evening_gratitude", None)
-                await self.supabase.set_preference_value(user_id, "weekly_reflection", None)
+                # Batch update all reset preferences in single DB call
+                reset_updates = {
+                    "onboarding_completed": False,
+                    "onboarding_step": "start",
+                    "day_planning": None,
+                    "accountability_checkin": None,
+                    "evening_gratitude": None,
+                    "weekly_reflection": None
+                }
+                await self.supabase.batch_update_preferences(user_id, reset_updates)
                 # Update the preferences object to reflect the reset
-                preferences["onboarding_completed"] = False
+                preferences.update(reset_updates)
                 onboarding_completed = False
             
             # Check if user needs onboarding (default to completed=True if not explicitly set to False)

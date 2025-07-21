@@ -106,25 +106,26 @@ CREATE TABLE IF NOT EXISTS user_progress (
     UNIQUE(subscriber_id, week_start)
 );
 
--- Scheduled Messages table (for background tasks)
+-- Scheduled Messages table (for new architecture)
 CREATE TABLE IF NOT EXISTS scheduled_messages (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     subscriber_id UUID REFERENCES subscribers(id) ON DELETE CASCADE,
     
     -- Message Details
     message_type VARCHAR(30) NOT NULL 
-        CHECK (message_type IN ('daily_affirmation', 'gratitude_prompt', 'weekly_reflection', 'check_in')),
-    content TEXT NOT NULL,
+        CHECK (message_type IN ('daily_affirmation', 'gratitude_prompt', 'accountability_checkin', 'day_planning', 'weekly_reflection', 'midday_boost', 'evening_wind_down', 'onboarding_welcome', 'onboarding_response', 'onboarding_question')),
     scheduled_for TIMESTAMP WITH TIME ZONE NOT NULL,
+    content TEXT, -- Pre-generated content for onboarding messages, NULL for AI-generated coaching messages
     
-    -- Status
+    -- Status with new architecture states
     status VARCHAR(20) DEFAULT 'pending' 
-        CHECK (status IN ('pending', 'sent', 'failed', 'cancelled')),
+        CHECK (status IN ('pending', 'queued', 'sent', 'failed', 'cancelled')),
     sent_at TIMESTAMP WITH TIME ZONE,
-    error_message TEXT,
+    last_error TEXT,
     
     -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Indexes for performance
@@ -138,6 +139,20 @@ CREATE INDEX IF NOT EXISTS idx_subscribers_timezone_updated ON subscribers(timez
 CREATE INDEX IF NOT EXISTS idx_conversations_subscriber_timestamp ON conversations(subscriber_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_user_progress_subscriber_week ON user_progress(subscriber_id, week_start DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduled_messages_pending ON scheduled_messages(status, scheduled_for) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_scheduled_messages_id ON scheduled_messages(id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_messages_subscriber ON scheduled_messages(subscriber_id);
+
+-- Execute Raw SQL function for SKIP LOCKED operations
+CREATE OR REPLACE FUNCTION execute_raw_sql(query text)
+RETURNS TABLE(id bigint, subscriber_id uuid, message_type text, scheduled_for timestamptz)
+LANGUAGE plpgsql 
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    RETURN QUERY EXECUTE query;
+END;
+$$;
 
 -- Updated timestamp triggers (with secure search path)
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -156,6 +171,12 @@ $$;
 DROP TRIGGER IF EXISTS update_subscribers_updated_at ON subscribers;
 CREATE TRIGGER update_subscribers_updated_at 
     BEFORE UPDATE ON subscribers 
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Add trigger for scheduled_messages updated_at
+DROP TRIGGER IF EXISTS update_scheduled_messages_updated_at ON scheduled_messages;
+CREATE TRIGGER update_scheduled_messages_updated_at 
+    BEFORE UPDATE ON scheduled_messages 
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- RLS (Row Level Security) Policies

@@ -5,18 +5,19 @@ Integrates psychological framework for evidence-based coaching conversations.
 
 import openai
 import json
-import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 
 from app.config import settings
+from app.logging_config import get_logger
 from app.services.mem0_client import Mem0Service
 from app.services.psychological_framework import PsychologicalFramework, PsychologicalProfile
 from app.services.enhanced_prompts import EnhancedPromptEngine
 from app.services.specialized_coaches import CoachType
 from app.services.core_personality import core_personality, ConversationContext
 
-logger = logging.getLogger(__name__)
+# Configure structured logging
+logger = get_logger("app.services.ai_coach")
 
 class AICoachService:
     """Enhanced AI Coach with psychological framework integration"""
@@ -67,7 +68,10 @@ class AICoachService:
             return welcome_msg
             
         except Exception as e:
-            logger.error(f"Error generating welcome message: {e}")
+            logger.error("ai_welcome_message_error",
+                        subscription_id=subscription.get("id"),
+                        error=str(e),
+                        exc_info=True)
             # Use context-aware fallback from personality system
             fallback_responses = core_personality.get_fallback_responses(ConversationContext.ACTIVATION)
             return fallback_responses[0]  # Use first fallback response
@@ -106,7 +110,9 @@ class AICoachService:
             
             # Use specialized coach prompt or fallback to enhanced prompt
             if coach_type != CoachType.ALWAYS_ON:
-                logger.info(f"Using specialized coach: {coach_type.value} for user {user_id}")
+                logger.info("ai_specialized_coach_selected",
+                       user_id=user_id,
+                       coach_type=coach_type.value)
                 enhanced_prompt = self.prompt_engine.get_specialized_coach_prompt(
                     coach_type=coach_type,
                     user_context=user_context,
@@ -127,7 +133,9 @@ class AICoachService:
                 )
             
             # Debug: Log the prompt being sent to OpenAI
-            logger.info(f"Sending prompt to OpenAI (first 200 chars): {enhanced_prompt[:200]}...")
+            logger.debug("ai_prompt_debug",
+                        user_id=user_id,
+                        prompt_preview=enhanced_prompt[:200])
             
             # Generate AI response using enhanced prompt
             response = self.openai_client.chat.completions.create(
@@ -162,17 +170,27 @@ class AICoachService:
             
             await self._enhance_memory_storage(conversation_messages, user_id, metadata)
             
-            logger.info(f"Generated response using {response_strategy.get('primary_technique')} for user {user_id}")
+            logger.info("ai_response_generated",
+                       user_id=user_id,
+                       primary_technique=response_strategy.get('primary_technique'),
+                       coach_type=coach_type.value)
             
             # Log performance
             response_time = (datetime.now() - start_time).total_seconds()
-            logger.info(f"Response generated in {response_time:.2f}s using {coach_type.value} coach for user {user_id}")
+            logger.info("ai_response_performance",
+                       user_id=user_id,
+                       response_time_seconds=response_time,
+                       coach_type=coach_type.value)
             
             return ai_response
             
         except Exception as e:
             response_time = (datetime.now() - start_time).total_seconds()
-            logger.error(f"Error generating AI response after {response_time:.2f}s: {e}")
+            logger.error("ai_response_error",
+                        user_id=user_id,
+                        response_time_seconds=response_time,
+                        error=str(e),
+                        exc_info=True)
             
             # Provide contextual fallback based on message sentiment
             return self._get_fallback_response(message)
@@ -236,7 +254,10 @@ Generate a single, concise morning affirmation that feels personal and resonates
             return affirmation
             
         except Exception as e:
-            logger.error(f"Error generating daily affirmation: {e}")
+            logger.error("ai_daily_affirmation_error",
+                        user_id=user_id,
+                        error=str(e),
+                        exc_info=True)
             # Simple, effective fallback
             fallbacks = [
                 "You are capable, confident, and ready for today.",
@@ -313,7 +334,10 @@ Generate a single, gentle gratitude prompt that invites peaceful reflection with
             return prompt
             
         except Exception as e:
-            logger.error(f"Error generating gratitude prompt: {e}")
+            logger.error("ai_gratitude_prompt_error",
+                        user_id=user_id,
+                        error=str(e),
+                        exc_info=True)
             # Gentle fallbacks based on system prompt examples
             fallbacks = [
                 "As you settle in tonight, notice one small joy that warmed your day and let it soothe you to sleep.",
@@ -390,7 +414,10 @@ Generate ONLY the first step: a gentle check-in that recaps their morning plan a
             return checkin_message
             
         except Exception as e:
-            logger.error(f"Error generating accountability check-in: {e}")
+            logger.error("ai_accountability_checkin_error",
+                        user_id=user_id,
+                        error=str(e),
+                        exc_info=True)
             # Varied fallbacks based on system prompt examples
             fallbacks = [
                 "Let's look back at your day! What did you accomplish from your morning goals? What's still pending?",
@@ -458,7 +485,9 @@ Generate ONLY the first step: a gentle check-in that recaps their morning plan a
             memories = await self.mem0_service.get_memories(user_id)
             return memories if memories else []
         except Exception as e:
-            logger.warning(f"Error retrieving memories for user {user_id}: {e}")
+            logger.warning("ai_memory_retrieval_warning",
+                          user_id=user_id,
+                          error=str(e))
             return []  # Return empty list to continue processing
     
     def _get_fallback_response(self, message: str) -> str:
@@ -484,7 +513,10 @@ Generate ONLY the first step: a gentle check-in that recaps their morning plan a
                 metadata=metadata
             )
         except Exception as e:
-            logger.error(f"Error storing memory for user {user_id}: {e}")
+            logger.error("ai_memory_storage_error",
+                        user_id=user_id,
+                        error=str(e),
+                        exc_info=True)
             # Continue without storing - don't break the conversation flow
 
     async def generate_weekly_reflection(self, user_id: str, user_context: Dict[str, Any]) -> str:
@@ -556,7 +588,10 @@ Generate the appropriate opening prompt based on whether this is their first wee
             return reflection
             
         except Exception as e:
-            logger.error(f"Error generating weekly reflection: {e}")
+            logger.error("ai_weekly_reflection_error",
+                        user_id=user_id,
+                        error=str(e),
+                        exc_info=True)
             # Varied fallbacks for different user types
             fallbacks = [
                 "🗓️ Welcome to your first weekly session! What would you love to accomplish or focus on in this very first week?",
@@ -623,7 +658,10 @@ Generate a single, engaging day planning prompt that motivates them to list thei
             return planning
             
         except Exception as e:
-            logger.error(f"Error generating day planning: {e}")
+            logger.error("ai_day_planning_error",
+                        user_id=user_id,
+                        error=str(e),
+                        exc_info=True)
             # Varied fallbacks based on system prompt examples
             fallbacks = [
                 "Now that you've started your day on a high note, let's plan your day. What tasks or goals do you want to tackle?",
@@ -692,7 +730,10 @@ Generate a single, energizing midday affirmation that acknowledges progress and 
             return affirmation
             
         except Exception as e:
-            logger.error(f"Error generating midday affirmation: {e}")
+            logger.error("ai_midday_affirmation_error",
+                        user_id=user_id,
+                        error=str(e),
+                        exc_info=True)
             # Varied fallbacks based on system prompt examples
             fallbacks = [
                 "I am proud of what I've accomplished so far today.",
@@ -762,7 +803,10 @@ Generate a single, soothing evening affirmation that helps them release today an
             return affirmation
             
         except Exception as e:
-            logger.error(f"Error generating evening affirmation: {e}")
+            logger.error("ai_evening_affirmation_error",
+                        user_id=user_id,
+                        error=str(e),
+                        exc_info=True)
             # Varied calming fallbacks based on system prompt examples
             fallbacks = [
                 "I did my best today, and that is enough.",

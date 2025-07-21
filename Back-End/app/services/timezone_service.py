@@ -3,12 +3,14 @@ Timezone Service for Positivity Push
 Handles manual timezone extraction from user input - privacy-first approach
 """
 
-import logging
 import re
 from typing import Optional
 from zoneinfo import available_timezones
 
-logger = logging.getLogger(__name__)
+from app.logging_config import get_logger
+
+# Configure structured logging
+logger = get_logger("app.services.timezone")
 
 # Regex pattern for extracting IANA timezone from natural language
 IANA_RE = re.compile(r"\b([A-Za-z]+/[A-Za-z_\-]+)\b")

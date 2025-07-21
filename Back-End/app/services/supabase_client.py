@@ -103,6 +103,23 @@ class SupabaseService:
             logger.error(f"Error updating user preferences: {e}")
             return False
     
+    async def batch_update_preferences(self, user_id: str, preference_updates: Dict[str, Any]) -> bool:
+        """Batch update multiple preference values in a single database call"""
+        try:
+            # Get current preferences
+            current_prefs = await self.get_user_preferences(user_id)
+            
+            # Merge updates
+            updated_prefs = {**current_prefs, **preference_updates}
+            
+            # Single database update
+            result = self.client.table("subscribers").update({"preferences": updated_prefs}).eq("id", user_id).execute()
+            logger.info(f"Batch updated preferences for user: {user_id}, keys: {list(preference_updates.keys())}")
+            return True
+        except Exception as e:
+            logger.error(f"Error batch updating preferences: {e}")
+            return False
+    
     async def set_preference_value(self, user_id: str, key: str, value: Any) -> bool:
         """Set a specific preference value for a user"""
         try:
@@ -394,7 +411,7 @@ class SupabaseService:
             # Join scheduled_messages with subscribers to get full context
             result = self.client.table("scheduled_messages") \
                 .select("""
-                    id, message_type, scheduled_for, status,
+                    id, message_type, scheduled_for, status, content,
                     subscriber:subscribers (
                         id, email, wa_id, phone_number, plan_type,
                         personal_goals, communication_style, active_challenges,
@@ -411,12 +428,29 @@ class SupabaseService:
                     'message_type': message_row['message_type'], 
                     'scheduled_for': message_row['scheduled_for'],
                     'status': message_row['status'],
+                    'content': message_row.get('content'),  # Include pre-generated content
                     'subscriber': message_row['subscriber']
                 }
             return None
             
         except Exception as e:
             logger.error(f"Error getting message with user context: {e}")
+            return None
+    
+    async def get_scheduled_message_content(self, message_id: int) -> Optional[Dict[str, Any]]:
+        """Get scheduled message with content field for pre-generated messages"""
+        try:
+            result = self.client.table("scheduled_messages") \
+                .select("id, message_type, content, status") \
+                .eq("id", message_id) \
+                .execute()
+            
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting scheduled message content: {e}")
             return None
     
     async def mark_message_sent(self, message_id: int) -> bool:
@@ -478,6 +512,34 @@ class SupabaseService:
             logger.error(f"Error cleaning up old messages: {e}")
             return 0
     
+    async def schedule_onboarding_message(self, subscriber_id: str, message_type: str, content: str, delay_seconds: int = 0) -> Optional[int]:
+        """Schedule an onboarding message for unified dispatcher delivery"""
+        try:
+            from datetime import datetime, timedelta
+            
+            scheduled_for = datetime.utcnow() + timedelta(seconds=delay_seconds)
+            
+            message_data = {
+                "subscriber_id": subscriber_id,
+                "message_type": message_type,
+                "content": content,  # Pre-generated content for onboarding
+                "scheduled_for": scheduled_for.isoformat() + "+00:00",
+                "status": "pending"
+            }
+            
+            result = self.client.table("scheduled_messages").insert(message_data).execute()
+            
+            if result.data:
+                message_id = result.data[0]["id"]
+                logger.info(f"Scheduled onboarding message: {message_id}, type: {message_type}")
+                return message_id
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error scheduling onboarding message: {e}")
+            return None
+
     async def populate_scheduled_messages_from_preferences(self) -> int:
         """Migration utility: populate scheduled_messages from user preferences"""
         try:

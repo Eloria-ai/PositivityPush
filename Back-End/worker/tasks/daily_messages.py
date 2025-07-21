@@ -122,10 +122,21 @@ def dispatch_message(self, message_id: int) -> Dict:
         subscriber = message_data['subscriber']
         message_type = message_data['message_type']
         
-        # Generate content using appropriate AI template
+        # Generate content using appropriate AI template or use pre-generated content
         content = asyncio.run(_generate_content_by_type(
             ai_coach, message_type, subscriber['id'], subscriber
         ))
+        
+        # For onboarding messages, use pre-generated content from the message record
+        if not content and message_type in ['onboarding_welcome', 'onboarding_response', 'onboarding_question']:
+            # Get pre-generated content from the scheduled message
+            full_message = asyncio.run(supabase_service.get_scheduled_message_content(message_id))
+            content = full_message.get('content') if full_message else None
+            
+            if content:
+                logger.info("using_pregenerated_content", 
+                           message_id=message_id,
+                           message_type=message_type)
         
         if not content:
             logger.error("content_generation_failed", 
@@ -167,11 +178,12 @@ def dispatch_message(self, message_id: int) -> Dict:
                 logger.error("message_marked_failed", 
                             message_id=message_id, 
                             final_error=str(e))
+                return {"status": "failed", "message_id": message_id, "error": str(e)}
             except Exception as mark_error:
                 logger.error("failed_to_mark_failed", 
                             message_id=message_id, 
                             mark_error=str(mark_error))
-            raise  # Don't retry - message is marked failed
+                return {"status": "failed", "message_id": message_id, "error": f"Final retry failed: {str(e)}"}
         
         # Exponential backoff retry
         countdown = 60 * (2 ** self.request.retries)
@@ -186,6 +198,7 @@ async def _generate_content_by_type(
     """Generate content using appropriate AI template based on message type"""
     
     try:
+        # Regular coaching messages
         if message_type == 'daily_affirmation':
             return await ai_coach.generate_daily_affirmation(user_id, user_context)
         elif message_type == 'gratitude_prompt':
@@ -200,6 +213,11 @@ async def _generate_content_by_type(
             return await ai_coach.generate_midday_boost(user_id, user_context)
         elif message_type == 'evening_wind_down':
             return await ai_coach.generate_evening_wind_down(user_id, user_context)
+        # Onboarding messages (pre-generated content stored in scheduled_messages)
+        elif message_type in ['onboarding_welcome', 'onboarding_response', 'onboarding_question']:
+            # For onboarding, content is pre-generated and stored in the message record
+            # Return None to trigger fallback to stored content
+            return None
         else:
             logger.error("unknown_message_type", message_type=message_type)
             return None
