@@ -1,14 +1,16 @@
 """
-Daily Messaging Tasks for Positivity Push
-Sends personalized affirmations, gratitude prompts, and check-ins.
+Daily Messaging Tasks for Positivity Push - REFACTORED ARCHITECTURE
+Implements driver + dispatcher pattern to respect user preferences from onboarding.
+Replaces old timezone-broadcast approach with user-specific scheduling.
 """
 
 from celery import shared_task
 from datetime import datetime, timedelta
-import logging
+import time
 import asyncio
 import sys
 import os
+from typing import Optional, Dict, List, Tuple
 
 # Add the app directory to Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'app'))
@@ -19,656 +21,287 @@ from services.supabase_client import SupabaseService
 from deps import get_supabase_client
 from config import settings
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure structured logging for production-ready observability
+try:
+    import structlog
+    import logging
+    import sys
+    
+    # Configure structlog with JSON output for log collectors
+    structlog.configure(
+        processors=[
+            structlog.processors.TimeStamper(fmt="iso", utc=True),
+            structlog.processors.add_log_level,
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer()
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
+    )
+    logger = structlog.get_logger(__name__)
+except ImportError:
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+def get_services() -> Tuple[SupabaseService, AICoachService, WhatsAppService]:
+    """Utility to avoid duplicating service initialization across tasks"""
+    db = get_supabase_client()
+    return (
+        SupabaseService(db),
+        AICoachService(),
+        WhatsAppService()
+    )
+
+# ===== NEW ARCHITECTURE: DRIVER + DISPATCHER =====
+
+@shared_task(bind=True)
+def process_personalized_messages(self, batch_size: int = 500) -> Dict:
+    """
+    DRIVER TASK: Sweeps scheduled_messages table for due messages and dispatches individual jobs.
+    
+    Replaces old timezone-broadcast approach with user-specific scheduling.
+    Uses existing DB index: idx_scheduled_messages_pending(status, scheduled_for)
+    """
+    start_time = time.time()
+    
+    try:
+        supabase_service, _, _ = get_services()
+        
+        # Sweep query using existing index with SKIP LOCKED
+        due_messages = asyncio.run(supabase_service.get_due_scheduled_messages(
+            batch_size=batch_size,
+            use_skip_locked=True
+        ))
+        
+        dispatched_count = 0
+        
+        for message in due_messages:
+            # Enqueue individual dispatcher job for each message
+            dispatch_message.delay(message['id'])
+            dispatched_count += 1
+        
+        duration_ms = round((time.time() - start_time) * 1000, 2)
+        
+        logger.info(
+            "personalized_messages_sweep",
+            messages_claimed=dispatched_count,
+            duration_ms=duration_ms,
+            batch_size=batch_size
+        )
+        
+        return {
+            "dispatched": dispatched_count,
+            "duration_ms": duration_ms,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error("personalized_messages_sweep_failed", error=str(e))
+        raise e
+
+@shared_task(bind=True, max_retries=3)
+def dispatch_message(self, message_id: int) -> Dict:
+    """
+    DISPATCHER TASK: Handles individual message delivery.
+    
+    Unified dispatcher replaces all the old per-template tasks.
+    Each scheduled_messages row becomes exactly one lightweight job.
+    """
+    try:
+        supabase_service, ai_coach, whatsapp_service = get_services()
+        
+        # Fetch message details and user context
+        message_data = asyncio.run(supabase_service.get_message_with_user_context(message_id))
+        
+        if not message_data:
+            logger.warning("message_not_found", message_id=message_id)
+            return {"status": "not_found", "message_id": message_id}
+        
+        subscriber = message_data['subscriber']
+        message_type = message_data['message_type']
+        
+        # Generate content using appropriate AI template
+        content = asyncio.run(_generate_content_by_type(
+            ai_coach, message_type, subscriber['id'], subscriber
+        ))
+        
+        if not content:
+            logger.error("content_generation_failed", 
+                        message_id=message_id, 
+                        message_type=message_type)
+            raise Exception(f"Failed to generate {message_type} content")
+        
+        # Send and log using common pattern
+        success = asyncio.run(_send_and_log(subscriber, content, message_type, supabase_service, whatsapp_service))
+        
+        if success:
+            # Mark message as sent
+            asyncio.run(supabase_service.mark_message_sent(message_id))
+            
+            logger.info("message_sent_successfully",
+                       message_id=message_id,
+                       message_type=message_type,
+                       user_email=subscriber.get('email'))
+            
+            return {
+                "status": "sent",
+                "message_id": message_id,
+                "message_type": message_type
+            }
+        else:
+            raise Exception("Message delivery failed")
+            
+    except Exception as e:
+        logger.error("message_dispatch_failed", 
+                    message_id=message_id, 
+                    error=str(e),
+                    retry_count=self.request.retries)
+        
+        # If this is the final retry, mark as failed to prevent infinite requeues
+        if self.request.retries >= self.max_retries:
+            try:
+                supabase_service, _, _ = get_services()
+                asyncio.run(supabase_service.mark_message_failed(message_id, str(e)))
+                logger.error("message_marked_failed", 
+                            message_id=message_id, 
+                            final_error=str(e))
+            except Exception as mark_error:
+                logger.error("failed_to_mark_failed", 
+                            message_id=message_id, 
+                            mark_error=str(mark_error))
+            raise  # Don't retry - message is marked failed
+        
+        # Exponential backoff retry
+        countdown = 60 * (2 ** self.request.retries)
+        raise self.retry(exc=e, countdown=countdown)
+
+async def _generate_content_by_type(
+    ai_coach: AICoachService, 
+    message_type: str, 
+    user_id: str, 
+    user_context: Dict
+) -> Optional[str]:
+    """Generate content using appropriate AI template based on message type"""
+    
+    try:
+        if message_type == 'daily_affirmation':
+            return await ai_coach.generate_daily_affirmation(user_id, user_context)
+        elif message_type == 'gratitude_prompt':
+            return await ai_coach.generate_gratitude_prompt(user_id, user_context)
+        elif message_type == 'accountability_checkin':
+            return await ai_coach.generate_accountability_checkin(user_id, user_context)
+        elif message_type == 'day_planning':
+            return await ai_coach.generate_day_planning_prompt(user_id, user_context)
+        elif message_type == 'weekly_reflection':
+            return await ai_coach.generate_weekly_reflection(user_id, user_context)
+        elif message_type == 'midday_boost':
+            return await ai_coach.generate_midday_boost(user_id, user_context)
+        elif message_type == 'evening_wind_down':
+            return await ai_coach.generate_evening_wind_down(user_id, user_context)
+        else:
+            logger.error("unknown_message_type", message_type=message_type)
+            return None
+            
+    except Exception as e:
+        logger.error("content_generation_error", 
+                    message_type=message_type, 
+                    user_id=user_id,
+                    error=str(e))
+        return None
+
+async def _send_and_log(subscriber: Dict, content: str, message_type: str, 
+                       supabase_service: SupabaseService, whatsapp_service: WhatsAppService) -> bool:
+    """Common send-and-log pattern to eliminate duplication"""
+    if not subscriber.get('wa_id'):
+        logger.warning("no_whatsapp_id", user_email=subscriber.get('email'))
+        return False
+    
+    success = await whatsapp_service.send_message(
+        to=subscriber['wa_id'],
+        message=content
+    )
+    
+    if success:
+        await supabase_service.log_conversation(
+            subscriber_id=subscriber['id'],
+            content=content,
+            message_type='assistant'
+        )
+        return True
+    else:
+        logger.error("whatsapp_delivery_failed", 
+                    user_email=subscriber.get('email'),
+                    wa_id=subscriber['wa_id'])
+        return False
+
+# ===== LEGACY TASKS (for backward compatibility during transition) =====
 
 @shared_task(bind=True, max_retries=3)
 def send_daily_accountability_checkin(self, timezone='UTC'):
-    """
-    Send personalized daily accountability check-ins to users
-    Ask about their goals: gym, habits, work progress, etc.
-    """
-    logger.info(f"Starting daily accountability check-ins for timezone: {timezone}")
-    
-    try:
-        return asyncio.run(_send_daily_accountability_async(timezone))
-    except Exception as e:
-        logger.error(f"Error in daily accountability task: {e}")
-        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
-async def _send_daily_accountability_async(timezone):
-    """Async implementation of daily accountability check-ins"""
-    
-    # Initialize services
-    db = get_supabase_client()
-    supabase_service = SupabaseService(db)
-    ai_coach = AICoachService()
-    whatsapp_service = WhatsAppService()
-    
-    # Get active subscribers for accountability check-ins
-    active_users = await supabase_service.get_subscribers_for_daily_message(timezone)
-    
-    successful_sends = 0
-    failed_sends = 0
-    
-    for user in active_users:
-        try:
-            # Generate personalized accountability check-in
-            user_context = {
-                "email": user.get("email"),
-                "plan_type": user.get("plan_type"),
-                "goals": user.get("personal_goals"),
-                "challenges": user.get("active_challenges")
-            }
-            
-            # AI generates personalized accountability message
-            accountability_message = await ai_coach.generate_accountability_checkin(
-                user["id"], 
-                user_context
-            )
-            
-            # Send via WhatsApp
-            if user.get("wa_id"):
-                await whatsapp_service.send_message(
-                    to=user["wa_id"],
-                    message=accountability_message
-                )
-                successful_sends += 1
-                logger.info(f"Accountability check-in sent to user {user['id']}")
-            
-        except Exception as e:
-            logger.error(f"Failed to send accountability check-in to user {user['id']}: {e}")
-            failed_sends += 1
-    
-    logger.info(f"Accountability check-ins completed. Success: {successful_sends}, Failed: {failed_sends}")
-    return {"successful": successful_sends, "failed": failed_sends}
+    """DEPRECATED: Use process_personalized_messages driver instead"""
+    logger.warning("deprecated_task_called", 
+                   task="send_daily_accountability_checkin", 
+                   timezone=timezone)
+    return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_morning_affirmations(self, timezone='UTC'):
-    """
-    Send personalized morning affirmations to active users
-    """
-    logger.info(f"Starting morning affirmations for timezone: {timezone}")
-    
-    try:
-        # Run async function in sync context
-        return asyncio.run(_send_morning_affirmations_async(timezone))
-    except Exception as e:
-        logger.error(f"Error in morning affirmations task: {e}")
-        # Retry with exponential backoff
-        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
-async def _send_morning_affirmations_async(timezone):
-    """Async implementation of morning affirmations"""
-    
-    logger.info(f"🌅 Starting morning affirmations for timezone: {timezone}")
-    
-    # Initialize services
-    db = get_supabase_client()
-    supabase_service = SupabaseService(db)
-    ai_coach = AICoachService()
-    whatsapp_service = WhatsAppService()
-    
-    # Get active subscribers for this timezone
-    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
-    logger.info(f"📊 Found {len(subscribers)} active subscribers for timezone {timezone}")
-    
-    sent_count = 0
-    error_count = 0
-    
-    for subscriber in subscribers:
-        try:
-            logger.info(f"👤 Processing subscriber: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
-            
-            # TEMPORARILY DISABLED: Skip if user has already received affirmation today
-            # if await _already_received_message_today(subscriber['id'], 'daily_affirmation', supabase_service):
-            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received message today")
-            #     continue
-            
-            # Generate personalized affirmation
-            affirmation = await ai_coach.generate_daily_affirmation(
-                user_id=subscriber['id'],
-                user_context=subscriber
-            )
-            
-            # Send via WhatsApp
-            if subscriber.get('wa_id'):
-                success = await whatsapp_service.send_message(
-                    to=subscriber['wa_id'],
-                    message=affirmation
-                )
-                
-                if success:
-                    # Log the sent message
-                    await supabase_service.log_conversation(
-                        subscriber_id=subscriber['id'],
-                        content=affirmation,
-                        message_type='assistant'
-                    )
-                    sent_count += 1
-                    logger.info(f"✅ Affirmation sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
-                else:
-                    error_count += 1
-                    logger.error(f"❌ Failed to send affirmation to {subscriber['email']} (WA: {subscriber['wa_id']})")
-            
-        except Exception as e:
-            error_count += 1
-            logger.error(f"Error processing user {subscriber.get('id', 'unknown')}: {e}")
-    
-    logger.info(f"Morning affirmations complete. Sent: {sent_count}, Errors: {error_count}")
-    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+    """DEPRECATED: Use process_personalized_messages driver instead"""
+    logger.warning("deprecated_task_called", task="send_morning_affirmations", timezone=timezone)
+    return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_evening_gratitude(self, timezone='UTC'):
-    """
-    Send personalized evening gratitude prompts to active users
-    """
-    logger.info(f"Starting evening gratitude prompts for timezone: {timezone}")
-    
-    try:
-        return asyncio.run(_send_evening_gratitude_async(timezone))
-    except Exception as e:
-        logger.error(f"Error in evening gratitude task: {e}")
-        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
-async def _send_evening_gratitude_async(timezone):
-    """Async implementation of evening gratitude prompts"""
-    
-    # Initialize services
-    db = get_supabase_client()
-    supabase_service = SupabaseService(db)
-    ai_coach = AICoachService()
-    whatsapp_service = WhatsAppService()
-    
-    # Get active subscribers for this timezone
-    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
-    
-    sent_count = 0
-    error_count = 0
-    
-    for subscriber in subscribers:
-        try:
-            # TEMPORARILY DISABLED: Skip if user has already received gratitude prompt today
-            # if await _already_received_message_today(subscriber['id'], 'gratitude_prompt', supabase_service):
-            #     continue
-            
-            # Generate personalized gratitude prompt
-            gratitude_prompt = await ai_coach.generate_gratitude_prompt(
-                user_id=subscriber['id'],
-                user_context=subscriber
-            )
-            
-            # Send via WhatsApp
-            if subscriber.get('wa_id'):
-                success = await whatsapp_service.send_message(
-                    to=subscriber['wa_id'],
-                    message=gratitude_prompt
-                )
-                
-                if success:
-                    # Log the sent message
-                    await supabase_service.log_conversation(
-                        subscriber_id=subscriber['id'],
-                        content=gratitude_prompt,
-                        message_type='assistant'
-                    )
-                    sent_count += 1
-                    logger.info(f"Gratitude prompt sent to user {subscriber['id']}")
-                else:
-                    error_count += 1
-                    logger.error(f"Failed to send gratitude prompt to user {subscriber['id']}")
-            
-        except Exception as e:
-            error_count += 1
-            logger.error(f"Error processing user {subscriber.get('id', 'unknown')}: {e}")
-    
-    logger.info(f"Evening gratitude prompts complete. Sent: {sent_count}, Errors: {error_count}")
-    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+    """DEPRECATED: Use process_personalized_messages driver instead"""
+    logger.warning("deprecated_task_called", task="send_evening_gratitude", timezone=timezone)
+    return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_weekly_reflection(self, timezone='UTC'):
-    """
-    Send weekly reflection and planning messages to users
-    Review the week's progress and plan for next week
-    """
-    logger.info(f"🗓️ Starting weekly reflection for timezone: {timezone}")
-    
-    try:
-        return asyncio.run(_send_weekly_reflection_async(timezone))
-    except Exception as e:
-        logger.error(f"Error in weekly reflection task: {e}")
-        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
-async def _send_weekly_reflection_async(timezone):
-    """Async implementation of weekly reflection"""
-    
-    # Initialize services
-    db = get_supabase_client()
-    supabase_service = SupabaseService(db)
-    ai_coach = AICoachService()
-    whatsapp_service = WhatsAppService()
-    
-    # Get active subscribers for this timezone
-    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
-    logger.info(f"📊 Found {len(subscribers)} active subscribers for weekly reflection - timezone {timezone}")
-    
-    sent_count = 0
-    error_count = 0
-    
-    for subscriber in subscribers:
-        try:
-            logger.info(f"👤 Processing weekly reflection for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
-            
-            # TEMPORARILY DISABLED: Skip if user has already received weekly reflection this week
-            # if await _already_received_message_this_week(subscriber['id'], 'weekly_reflection', supabase_service):
-            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received weekly reflection this week")
-            #     continue
-            
-            # Generate personalized weekly reflection
-            reflection = await ai_coach.generate_weekly_reflection(
-                user_id=subscriber['id'],
-                user_context=subscriber
-            )
-            
-            # Send via WhatsApp
-            if subscriber.get('wa_id'):
-                success = await whatsapp_service.send_message(
-                    to=subscriber['wa_id'],
-                    message=reflection
-                )
-                
-                if success:
-                    # Log the sent message
-                    await supabase_service.log_conversation(
-                        subscriber_id=subscriber['id'],
-                        content=reflection,
-                        message_type='assistant'
-                    )
-                    sent_count += 1
-                    logger.info(f"✅ Weekly reflection sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
-                else:
-                    error_count += 1
-                    logger.error(f"❌ Failed to send weekly reflection to {subscriber['email']} (WA: {subscriber['wa_id']})")
-            
-        except Exception as e:
-            error_count += 1
-            logger.error(f"Error processing weekly reflection for user {subscriber.get('id', 'unknown')}: {e}")
-    
-    logger.info(f"🗓️ Weekly reflection complete. Sent: {sent_count}, Errors: {error_count}")
-    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+    """DEPRECATED: Use process_personalized_messages driver instead"""
+    logger.warning("deprecated_task_called", task="send_weekly_reflection", timezone=timezone)
+    return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_day_planning(self, timezone='UTC'):
-    """
-    Send day planning messages to users
-    Help them structure their day and set intentions
-    """
-    logger.info(f"📝 Starting day planning for timezone: {timezone}")
-    
-    try:
-        return asyncio.run(_send_day_planning_async(timezone))
-    except Exception as e:
-        logger.error(f"Error in day planning task: {e}")
-        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
-async def _send_day_planning_async(timezone):
-    """Async implementation of day planning"""
-    
-    # Initialize services
-    db = get_supabase_client()
-    supabase_service = SupabaseService(db)
-    ai_coach = AICoachService()
-    whatsapp_service = WhatsAppService()
-    
-    # Get active subscribers for this timezone
-    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
-    logger.info(f"📊 Found {len(subscribers)} active subscribers for day planning - timezone {timezone}")
-    
-    sent_count = 0
-    error_count = 0
-    
-    for subscriber in subscribers:
-        try:
-            logger.info(f"👤 Processing day planning for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
-            
-            # TEMPORARILY DISABLED: Skip if user has already received day planning today
-            # if await _already_received_message_today(subscriber['id'], 'day_planning', supabase_service):
-            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received day planning today")
-            #     continue
-            
-            # Generate personalized day planning
-            planning = await ai_coach.generate_day_planning(
-                user_id=subscriber['id'],
-                user_context=subscriber
-            )
-            
-            # Send via WhatsApp
-            if subscriber.get('wa_id'):
-                success = await whatsapp_service.send_message(
-                    to=subscriber['wa_id'],
-                    message=planning
-                )
-                
-                if success:
-                    # Log the sent message
-                    await supabase_service.log_conversation(
-                        subscriber_id=subscriber['id'],
-                        content=planning,
-                        message_type='assistant'
-                    )
-                    sent_count += 1
-                    logger.info(f"✅ Day planning sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
-                else:
-                    error_count += 1
-                    logger.error(f"❌ Failed to send day planning to {subscriber['email']} (WA: {subscriber['wa_id']})")
-            
-        except Exception as e:
-            error_count += 1
-            logger.error(f"Error processing day planning for user {subscriber.get('id', 'unknown')}: {e}")
-    
-    logger.info(f"📝 Day planning complete. Sent: {sent_count}, Errors: {error_count}")
-    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+    """DEPRECATED: Use process_personalized_messages driver instead"""
+    logger.warning("deprecated_task_called", task="send_day_planning", timezone=timezone)
+    return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_midday_affirmation(self, timezone='UTC'):
-    """
-    Send mid-day affirmation messages to users
-    Boost energy and motivation during the day
-    """
-    logger.info(f"☀️ Starting mid-day affirmation for timezone: {timezone}")
-    
-    try:
-        return asyncio.run(_send_midday_affirmation_async(timezone))
-    except Exception as e:
-        logger.error(f"Error in mid-day affirmation task: {e}")
-        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
-async def _send_midday_affirmation_async(timezone):
-    """Async implementation of mid-day affirmation"""
-    
-    # Initialize services
-    db = get_supabase_client()
-    supabase_service = SupabaseService(db)
-    ai_coach = AICoachService()
-    whatsapp_service = WhatsAppService()
-    
-    # Get active subscribers for this timezone
-    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
-    logger.info(f"📊 Found {len(subscribers)} active subscribers for mid-day affirmation - timezone {timezone}")
-    
-    sent_count = 0
-    error_count = 0
-    
-    for subscriber in subscribers:
-        try:
-            logger.info(f"👤 Processing mid-day affirmation for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
-            
-            # TEMPORARILY DISABLED: Skip if user has already received mid-day affirmation today
-            # if await _already_received_message_today(subscriber['id'], 'midday_affirmation', supabase_service):
-            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received mid-day affirmation today")
-            #     continue
-            
-            # Generate personalized mid-day affirmation
-            affirmation = await ai_coach.generate_midday_affirmation(
-                user_id=subscriber['id'],
-                user_context=subscriber
-            )
-            
-            # Send via WhatsApp
-            if subscriber.get('wa_id'):
-                success = await whatsapp_service.send_message(
-                    to=subscriber['wa_id'],
-                    message=affirmation
-                )
-                
-                if success:
-                    # Log the sent message
-                    await supabase_service.log_conversation(
-                        subscriber_id=subscriber['id'],
-                        content=affirmation,
-                        message_type='assistant'
-                    )
-                    sent_count += 1
-                    logger.info(f"✅ Mid-day affirmation sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
-                else:
-                    error_count += 1
-                    logger.error(f"❌ Failed to send mid-day affirmation to {subscriber['email']} (WA: {subscriber['wa_id']})")
-            
-        except Exception as e:
-            error_count += 1
-            logger.error(f"Error processing mid-day affirmation for user {subscriber.get('id', 'unknown')}: {e}")
-    
-    logger.info(f"☀️ Mid-day affirmation complete. Sent: {sent_count}, Errors: {error_count}")
-    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+    """DEPRECATED: Use process_personalized_messages driver instead"""
+    logger.warning("deprecated_task_called", task="send_midday_affirmation", timezone=timezone)
+    return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_evening_affirmation(self, timezone='UTC'):
-    """
-    Send evening affirmation messages to users
-    End the day with positive reinforcement
-    """
-    logger.info(f"🌙 Starting evening affirmation for timezone: {timezone}")
-    
-    try:
-        return asyncio.run(_send_evening_affirmation_async(timezone))
-    except Exception as e:
-        logger.error(f"Error in evening affirmation task: {e}")
-        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
-async def _send_evening_affirmation_async(timezone):
-    """Async implementation of evening affirmation"""
-    
-    # Initialize services
-    db = get_supabase_client()
-    supabase_service = SupabaseService(db)
-    ai_coach = AICoachService()
-    whatsapp_service = WhatsAppService()
-    
-    # Get active subscribers for this timezone
-    subscribers = await supabase_service.get_subscribers_for_daily_message(timezone)
-    logger.info(f"📊 Found {len(subscribers)} active subscribers for evening affirmation - timezone {timezone}")
-    
-    sent_count = 0
-    error_count = 0
-    
-    for subscriber in subscribers:
-        try:
-            logger.info(f"👤 Processing evening affirmation for: {subscriber['email']} (WA: {subscriber.get('wa_id', 'None')})")
-            
-            # TEMPORARILY DISABLED: Skip if user has already received evening affirmation today
-            # if await _already_received_message_today(subscriber['id'], 'evening_affirmation', supabase_service):
-            #     logger.info(f"⏭️ Skipping {subscriber['email']} - already received evening affirmation today")
-            #     continue
-            
-            # Generate personalized evening affirmation
-            affirmation = await ai_coach.generate_evening_affirmation(
-                user_id=subscriber['id'],
-                user_context=subscriber
-            )
-            
-            # Send via WhatsApp
-            if subscriber.get('wa_id'):
-                success = await whatsapp_service.send_message(
-                    to=subscriber['wa_id'],
-                    message=affirmation
-                )
-                
-                if success:
-                    # Log the sent message
-                    await supabase_service.log_conversation(
-                        subscriber_id=subscriber['id'],
-                        content=affirmation,
-                        message_type='assistant'
-                    )
-                    sent_count += 1
-                    logger.info(f"✅ Evening affirmation sent successfully to {subscriber['email']} (WA: {subscriber['wa_id']})")
-                else:
-                    error_count += 1
-                    logger.error(f"❌ Failed to send evening affirmation to {subscriber['email']} (WA: {subscriber['wa_id']})")
-            
-        except Exception as e:
-            error_count += 1
-            logger.error(f"Error processing evening affirmation for user {subscriber.get('id', 'unknown')}: {e}")
-    
-    logger.info(f"🌙 Evening affirmation complete. Sent: {sent_count}, Errors: {error_count}")
-    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+    """DEPRECATED: Use process_personalized_messages driver instead"""
+    logger.warning("deprecated_task_called", task="send_evening_affirmation", timezone=timezone)
+    return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_weekly_check_ins(self, timezone='UTC'):
-    """
-    Send weekly check-in messages to users
-    """
-    logger.info(f"Starting weekly check-ins for timezone: {timezone}")
-    
-    try:
-        return asyncio.run(_send_weekly_check_ins_async(timezone))
-    except Exception as e:
-        logger.error(f"Error in weekly check-ins task: {e}")
-        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
-async def _send_weekly_check_ins_async(timezone):
-    """Async implementation of weekly check-ins"""
-    
-    # Initialize services
-    db = get_supabase_client()
-    supabase_service = SupabaseService(db)
-    whatsapp_service = WhatsAppService()
-    
-    # Get active subscribers
-    subscribers = await supabase_service.get_active_subscribers()
-    
-    sent_count = 0
-    error_count = 0
-    
-    check_in_messages = [
-        "How has your week been? What's one thing you're proud of? 🌟",
-        "What's been the highlight of your week so far? I'd love to celebrate with you! 🎉",
-        "How are you feeling about your goals this week? Any wins to share? 💪",
-        "What's one thing you've learned about yourself this week? 💭",
-        "How's your energy been? What's been fueling you or draining you? ⚡",
-    ]
-    
-    for subscriber in subscribers:
-        try:
-            # TEMPORARILY DISABLED: Skip if user received check-in this week
-            # if await _already_received_message_this_week(subscriber['id'], 'weekly_check_in', supabase_service):
-            #     continue
-            
-            # Choose check-in message based on user ID (for variety)
-            message_index = hash(subscriber['id']) % len(check_in_messages)
-            check_in_message = check_in_messages[message_index]
-            
-            # Send via WhatsApp
-            if subscriber.get('wa_id'):
-                success = await whatsapp_service.send_message(
-                    to=subscriber['wa_id'],
-                    message=check_in_message
-                )
-                
-                if success:
-                    # Log the sent message
-                    await supabase_service.log_conversation(
-                        subscriber_id=subscriber['id'],
-                        content=check_in_message,
-                        message_type='assistant'
-                    )
-                    sent_count += 1
-                    logger.info(f"Check-in sent to user {subscriber['id']}")
-                else:
-                    error_count += 1
-                    logger.error(f"Failed to send check-in to user {subscriber['id']}")
-            
-        except Exception as e:
-            error_count += 1
-            logger.error(f"Error processing user {subscriber.get('id', 'unknown')}: {e}")
-    
-    logger.info(f"Weekly check-ins complete. Sent: {sent_count}, Errors: {error_count}")
-    return {"sent": sent_count, "errors": error_count, "timezone": timezone}
+    """DEPRECATED: Use process_personalized_messages driver instead"""
+    logger.warning("deprecated_task_called", task="send_weekly_check_ins", timezone=timezone)
+    return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task
 def cleanup_old_scheduled_messages():
-    """
-    Clean up old scheduled messages (older than 7 days)
-    """
-    logger.info("Starting cleanup of old scheduled messages")
-    
+    """Clean up old completed/failed messages"""
     try:
-        return asyncio.run(_cleanup_old_scheduled_messages_async())
-    except Exception as e:
-        logger.error(f"Error in cleanup task: {e}")
-        return {"error": str(e)}
-
-async def _cleanup_old_scheduled_messages_async():
-    """Async implementation of message cleanup"""
-    
-    db = get_supabase_client()
-    
-    # Delete messages older than 7 days
-    cutoff_date = datetime.utcnow() - timedelta(days=7)
-    
-    try:
-        result = db.table("scheduled_messages").delete().lt("created_at", cutoff_date.isoformat()).execute()
-        deleted_count = len(result.data) if result.data else 0
+        supabase_service, _, _ = get_services()
+        cleaned_count = asyncio.run(supabase_service.cleanup_old_messages(days_old=7))
         
-        logger.info(f"Cleaned up {deleted_count} old scheduled messages")
-        return {"deleted": deleted_count}
+        logger.info("cleanup_completed", messages_cleaned=cleaned_count)
+        return {"cleaned": cleaned_count, "status": "success"}
         
     except Exception as e:
-        logger.error(f"Error during cleanup: {e}")
-        return {"error": str(e)}
+        logger.error("cleanup_failed", error=str(e))
+        raise e
 
-# Helper functions
-async def _already_received_message_today(subscriber_id: str, message_type: str, supabase_service: SupabaseService) -> bool:
-    """Check if user already received a specific message type today"""
-    try:
-        today = datetime.utcnow().date()
-        
-        # Check conversations table for today's messages
-        conversations = await supabase_service.get_conversation_history(subscriber_id, limit=50)
-        
-        for conv in conversations:
-            conv_date = datetime.fromisoformat(conv['timestamp']).date()
-            if (conv_date == today and 
-                conv['message_type'] == 'assistant' and
-                any(keyword in conv['content'].lower() for keyword in _get_message_keywords(message_type))):
-                return True
-        
-        return False
-        
-    except Exception as e:
-        logger.error(f"Error checking message history: {e}")
-        return False
+# OLD IMPLEMENTATIONS REMOVED - functionality consolidated into dispatch_message
 
-async def _already_received_message_this_week(subscriber_id: str, message_type: str, supabase_service: SupabaseService) -> bool:
-    """Check if user already received a specific message type this week"""
-    try:
-        week_start = datetime.utcnow().date() - timedelta(days=datetime.utcnow().weekday())
-        
-        conversations = await supabase_service.get_conversation_history(subscriber_id, limit=100)
-        
-        for conv in conversations:
-            conv_date = datetime.fromisoformat(conv['timestamp']).date()
-            if (conv_date >= week_start and 
-                conv['message_type'] == 'assistant' and
-                any(keyword in conv['content'].lower() for keyword in _get_message_keywords(message_type))):
-                return True
-        
-        return False
-        
-    except Exception as e:
-        logger.error(f"Error checking weekly message history: {e}")
-        return False
-
-def _get_message_keywords(message_type: str) -> list:
-    """Get keywords to identify message types"""
-    keywords = {
-        'daily_affirmation': ['today', 'this morning', 'affirmation', 'you are', 'you can'],
-        'gratitude_prompt': ['grateful', 'gratitude', 'appreciate', 'thankful', 'reflect'],
-        'weekly_check_in': ['week', 'how has', 'how are you', 'check in', 'proud of'],
-        'weekly_reflection': ['week', 'reflection', 'progress', 'goals', 'looking back'],
-        'day_planning': ['plan', 'today', 'intentions', 'priorities', 'schedule'],
-        'midday_affirmation': ['midday', 'afternoon', 'energy', 'motivation', 'keep going'],
-        'evening_affirmation': ['evening', 'tonight', 'accomplished', 'proud', 'tomorrow']
-    }
-    return keywords.get(message_type, [])
+# END OF FILE - All old implementations removed and replaced with new driver+dispatcher architecture

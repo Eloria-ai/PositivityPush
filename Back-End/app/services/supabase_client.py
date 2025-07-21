@@ -329,3 +329,171 @@ class SupabaseService:
         except Exception as e:
             logger.error(f"Error checking time match: {e}")
             return False
+    
+    # ===== SCHEDULED MESSAGES METHODS (New Architecture) =====
+    
+    async def get_due_scheduled_messages(self, batch_size: int = 500, use_skip_locked: bool = True) -> List[Dict[str, Any]]:
+        """
+        Get due messages using SKIP LOCKED to prevent race conditions.
+        Updates status to 'queued' atomically to prevent duplicate processing.
+        """
+        try:
+            if use_skip_locked:
+                # Use raw SQL with SKIP LOCKED for atomic queue+lock operation
+                sql = f"""
+                    WITH cte AS (
+                        SELECT id, subscriber_id, message_type, scheduled_for
+                        FROM   scheduled_messages
+                        WHERE  status = 'pending'
+                        AND    scheduled_for <= now()
+                        ORDER  BY scheduled_for
+                        LIMIT  {batch_size}
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    UPDATE scheduled_messages
+                    SET    status = 'queued',
+                           updated_at = now()
+                    FROM   cte
+                    WHERE  scheduled_messages.id = cte.id
+                    RETURNING scheduled_messages.id, scheduled_messages.subscriber_id, 
+                              scheduled_messages.message_type, scheduled_messages.scheduled_for;
+                """
+                
+                # IMPORTANT: This requires the following RPC function in Supabase SQL Editor:
+                # CREATE OR REPLACE FUNCTION execute_raw_sql(query text)
+                # RETURNS TABLE(id bigint, subscriber_id uuid, message_type text, scheduled_for timestamptz)
+                # LANGUAGE plpgsql SECURITY DEFINER
+                # AS $$
+                # BEGIN
+                #     RETURN QUERY EXECUTE query;
+                # END;
+                # $$;
+                
+                result = self.client.rpc("execute_raw_sql", {"query": sql}).execute()
+                return result.data if result.data else []
+            else:
+                # Fallback without SKIP LOCKED (for testing)
+                from datetime import datetime
+                current_time = datetime.utcnow().isoformat()
+                result = self.client.table("scheduled_messages") \
+                    .select("id, subscriber_id, message_type, scheduled_for") \
+                    .eq("status", "pending") \
+                    .lte("scheduled_for", current_time) \
+                    .order("scheduled_for") \
+                    .limit(batch_size) \
+                    .execute()
+                return result.data if result.data else []
+                
+        except Exception as e:
+            logger.error(f"Error getting due scheduled messages: {e}")
+            return []
+    
+    async def get_message_with_user_context(self, message_id: int) -> Optional[Dict[str, Any]]:
+        """Get message details with full subscriber context for AI generation"""
+        try:
+            # Join scheduled_messages with subscribers to get full context
+            result = self.client.table("scheduled_messages") \
+                .select("""
+                    id, message_type, scheduled_for, status,
+                    subscriber:subscribers (
+                        id, email, wa_id, phone_number, plan_type,
+                        personal_goals, communication_style, active_challenges,
+                        current_timezone, preferences
+                    )
+                """) \
+                .eq("id", message_id) \
+                .execute()
+            
+            if result.data and len(result.data) > 0:
+                message_row = result.data[0]
+                return {
+                    'id': message_row['id'],
+                    'message_type': message_row['message_type'], 
+                    'scheduled_for': message_row['scheduled_for'],
+                    'status': message_row['status'],
+                    'subscriber': message_row['subscriber']
+                }
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting message with user context: {e}")
+            return None
+    
+    async def mark_message_sent(self, message_id: int) -> bool:
+        """Mark message as successfully sent"""
+        try:
+            from datetime import datetime
+            result = self.client.table("scheduled_messages") \
+                .update({
+                    "status": "sent",
+                    "updated_at": datetime.utcnow().isoformat()
+                }) \
+                .eq("id", message_id) \
+                .execute()
+            
+            logger.info(f"Marked message {message_id} as sent")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error marking message sent: {e}")
+            return False
+    
+    async def mark_message_failed(self, message_id: int, error: str) -> bool:
+        """Mark message as failed with error details (prevents infinite requeues)"""
+        try:
+            from datetime import datetime
+            result = self.client.table("scheduled_messages") \
+                .update({
+                    "status": "failed",
+                    "last_error": error[:500],  # Truncate error to keep row size manageable
+                    "updated_at": datetime.utcnow().isoformat()
+                }) \
+                .eq("id", message_id) \
+                .execute()
+            
+            logger.warning(f"Marked message {message_id} as failed: {error[:100]}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error marking message failed: {e}")
+            return False
+    
+    async def cleanup_old_messages(self, days_old: int = 7) -> int:
+        """Clean up old completed/failed messages to prevent table bloat"""
+        try:
+            from datetime import datetime, timedelta
+            cutoff_date = (datetime.utcnow() - timedelta(days=days_old)).isoformat()
+            
+            result = self.client.table("scheduled_messages") \
+                .delete() \
+                .in_("status", ["sent", "failed"]) \
+                .lt("updated_at", cutoff_date) \
+                .execute()
+            
+            cleaned_count = len(result.data) if result.data else 0
+            logger.info(f"Cleaned up {cleaned_count} old scheduled messages")
+            return cleaned_count
+            
+        except Exception as e:
+            logger.error(f"Error cleaning up old messages: {e}")
+            return 0
+    
+    async def populate_scheduled_messages_from_preferences(self) -> int:
+        """Migration utility: populate scheduled_messages from user preferences"""
+        try:
+            # Get all active subscribers with preferences
+            result = self.client.table("subscribers") \
+                .select("id, current_timezone, preferences") \
+                .eq("status", "active") \
+                .execute()
+            
+            migrated_count = 0
+            # Implementation would create scheduled_messages entries based on user preferences
+            # This is a placeholder for the actual migration logic
+            
+            logger.info(f"Migrated {migrated_count} users to scheduled_messages")
+            return migrated_count
+            
+        except Exception as e:
+            logger.error(f"Error populating scheduled messages: {e}")
+            return 0
