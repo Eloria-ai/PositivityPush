@@ -44,6 +44,9 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     result_expires=3600,  # 1 hour
     broker_connection_retry_on_startup=True,
+    # Task time limits to prevent stalled WhatsApp/API calls
+    task_soft_time_limit=30,  # Warning after 30 seconds
+    task_time_limit=60,       # Hard kill after 60 seconds
 )
 
 # Dynamic user-specific scheduling - replaces hardcoded timezone broadcasts
@@ -51,7 +54,7 @@ celery_app.conf.beat_schedule = {
     # Driver task: sweeps DB for users whose next_notification_utc <= now() and enqueues personalized messages
     'process-personalized-messages': {
         'task': 'worker.tasks.daily_messages.process_personalized_messages',
-        'schedule': crontab(minute='*/15'),  # Check every 15 minutes for due messages
+        'schedule': crontab(minute='*/5'),  # Check every 5 minutes for due messages (responsive delivery)
     },
     
     # Weekly progress reports (Sunday 6 PM)
@@ -97,17 +100,15 @@ def run_diagnostics():
     print(f"Beat schedule entries: {len(schedule)}")
 
     for name, config in schedule.items():
-        if 'daily' in name or 'morning' in name or 'accountability' in name or 'evening' in name:
+        if 'personalized' in name or 'weekly' in name or 'cleanup' in name:
             print(f"  📅 {name}: {config['task']}")
     
     # Check specific tasks
     target_tasks = [
-        'worker.tasks.daily_messages.send_morning_affirmations',
-        'worker.tasks.daily_messages.send_daily_accountability_checkin',
-        'worker.tasks.daily_messages.send_evening_gratitude'
+        'worker.tasks.daily_messages.process_personalized_messages'
     ]
 
-    print(f"Specific task registration:")
+    print(f"Driver task registration:")
     for task_name in target_tasks:
         if task_name in all_tasks:
             print(f"✅ {task_name} - REGISTERED")
@@ -139,17 +140,15 @@ def test_celery_config():
     print(f"\nBeat schedule entries: {len(schedule)}")
 
     for name, config in schedule.items():
-        if 'daily' in name or 'morning' in name or 'accountability' in name or 'evening' in name:
+        if 'personalized' in name or 'weekly' in name or 'cleanup' in name:
             print(f"  📅 {name}: {config['task']}")
     
-    # Check specific tasks
+    # Check driver task
     target_tasks = [
-        'worker.tasks.daily_messages.send_morning_affirmations',
-        'worker.tasks.daily_messages.send_daily_accountability_checkin',
-        'worker.tasks.daily_messages.send_evening_gratitude'
+        'worker.tasks.daily_messages.process_personalized_messages'
     ]
 
-    print(f"\nSpecific task registration:")
+    print(f"\nDriver task registration:")
     for task_name in target_tasks:
         if task_name in all_tasks:
             print(f"✅ {task_name} - REGISTERED")
@@ -162,12 +161,12 @@ def test_manual_task_trigger():
     print("=" * 40)
     
     try:
-        from worker.tasks.daily_messages import send_morning_affirmations
+        from worker.tasks.daily_messages import process_personalized_messages
         print("✅ Task import successful")
         
-        # Trigger task manually
-        print("📤 Triggering morning affirmations task...")
-        result = send_morning_affirmations.delay('UTC')
+        # Trigger driver task manually
+        print("📤 Triggering personalized messages driver task...")
+        result = process_personalized_messages.delay()
         print(f"✅ Task triggered! ID: {result.id}")
         
         # Try to get result
