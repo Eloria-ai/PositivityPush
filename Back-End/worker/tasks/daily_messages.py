@@ -36,10 +36,33 @@ try:
         logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
     )
     logger = structlog.get_logger(__name__)
+    IS_STRUCTLOG = True
 except ImportError:
     import logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
+    IS_STRUCTLOG = False
+
+# Helper functions to handle both structlog and standard logging
+def log_info(message, **kwargs):
+    if IS_STRUCTLOG:
+        logger.info(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.info(f"{message}: {extras}")
+        else:
+            logger.info(message)
+
+def log_error(message, **kwargs):
+    if IS_STRUCTLOG:
+        logger.error(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.error(f"{message}: {extras}")
+        else:
+            logger.error(message)
 
 def get_services() -> Tuple[SupabaseService, AICoachService, WhatsAppService]:
     """Utility to avoid duplicating service initialization across tasks"""
@@ -94,7 +117,7 @@ def process_personalized_messages(self, batch_size: int = 500) -> Dict:
         }
         
     except Exception as e:
-        logger.error("personalized_messages_sweep_failed", error=str(e))
+        log_error("personalized_messages_sweep_failed", error=str(e))
         raise e
 
 @shared_task(bind=True, max_retries=3)

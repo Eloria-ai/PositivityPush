@@ -11,13 +11,56 @@ import time
 import hashlib
 import asyncio
 
-# Use structured logging
+# Use structured logging with fallback support
 try:
     import structlog
     logger = structlog.get_logger(__name__)
+    IS_STRUCTLOG = True
 except ImportError:
     import logging
     logger = logging.getLogger(__name__)
+    IS_STRUCTLOG = False
+
+# Helper functions to handle both structlog and standard logging
+def log_info(message, **kwargs):
+    if IS_STRUCTLOG:
+        logger.info(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.info(f"{message}: {extras}")
+        else:
+            logger.info(message)
+
+def log_warning(message, **kwargs):
+    if IS_STRUCTLOG:
+        logger.warning(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.warning(f"{message}: {extras}")
+        else:
+            logger.warning(message)
+
+def log_error(message, **kwargs):
+    if IS_STRUCTLOG:
+        logger.error(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.error(f"{message}: {extras}")
+        else:
+            logger.error(message)
+
+def log_debug(message, **kwargs):
+    if IS_STRUCTLOG:
+        logger.debug(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.debug(f"{message}: {extras}")
+        else:
+            logger.debug(message)
 
 from app.services.whatsapp_service import WhatsAppService
 from app.services.supabase_client import SupabaseService
@@ -47,9 +90,9 @@ async def send_message_once(whatsapp_service, wa_id: str, message: str, dedupe_k
     
     # Check if already sent
     if redis.exists(dedupe_key):
-        logger.warning("duplicate_message_suppressed", 
-                      wa_id=wa_id, 
-                      dedupe_key=dedupe_key)
+        log_warning("duplicate_message_suppressed", 
+                   wa_id=wa_id, 
+                   dedupe_key=dedupe_key)
         return True  # Return success since message was already sent
     
     # Send message
@@ -58,8 +101,8 @@ async def send_message_once(whatsapp_service, wa_id: str, message: str, dedupe_k
     # Mark as sent if successful (1 hour TTL)
     if success:
         redis.setex(dedupe_key, 3600, "sent")
-        logger.info("message_dedupe_cached", 
-                   dedupe_key=dedupe_key)
+        log_info("message_dedupe_cached", 
+                dedupe_key=dedupe_key)
     
     return success
 
@@ -79,25 +122,25 @@ async def shadow_write_to_dispatcher(supabase_service, user_id: str, message_typ
                 user_id, message_type, content, delay_seconds
             )
             if message_id:
-                logger.info("shadow_write_success", 
-                           user_id=user_id,
-                           message_type=message_type,
-                           message_id=message_id,
-                           dispatcher_enabled=True)
+                log_info("shadow_write_success", 
+                        user_id=user_id,
+                        message_type=message_type,
+                        message_id=message_id,
+                        dispatcher_enabled=True)
                 return message_id
             else:
-                logger.warning("shadow_write_failed", 
-                              user_id=user_id, 
-                              message_type=message_type)
+                log_warning("shadow_write_failed", 
+                           user_id=user_id, 
+                           message_type=message_type)
         else:
-            logger.debug("shadow_write_disabled", 
-                        user_id=user_id,
-                        message_type=message_type)
+            log_debug("shadow_write_disabled", 
+                     user_id=user_id,
+                     message_type=message_type)
         
         return None
         
     except Exception as e:
-        logger.error("shadow_write_error", 
+        log_error("shadow_write_error", 
                     user_id=user_id,
                     message_type=message_type, 
                     error=str(e))
@@ -123,7 +166,7 @@ def send_onboarding_message(self, wa_id: str, message: str, message_type: str = 
         dedupe_key = create_dedupe_key(user_id, message)
     
     try:
-        logger.info("onboarding_send_start",
+        log_info("onboarding_send_start",
                    wa_id=wa_id,
                    message_type=message_type,
                    dedupe_key=dedupe_key,
@@ -138,14 +181,14 @@ def send_onboarding_message(self, wa_id: str, message: str, message_type: str = 
         duration_ms = round((time.time() - start_time) * 1000, 2)
         
         if success:
-            logger.info("onboarding_send_success",
+            log_info("onboarding_send_success",
                        wa_id=wa_id,
                        message_type=message_type,
                        duration_ms=duration_ms,
                        idempotent=bool(dedupe_key))
             return {"status": "success", "wa_id": wa_id, "message_type": message_type}
         else:
-            logger.error("onboarding_send_failed",
+            log_error("onboarding_send_failed",
                         wa_id=wa_id,
                         message_type=message_type,
                         duration_ms=duration_ms)
@@ -153,7 +196,7 @@ def send_onboarding_message(self, wa_id: str, message: str, message_type: str = 
             
     except Exception as exc:
         duration_ms = round((time.time() - start_time) * 1000, 2)
-        logger.error("onboarding_send_error",
+        log_error("onboarding_send_error",
                     wa_id=wa_id,
                     message_type=message_type,
                     error=str(exc),
@@ -183,7 +226,7 @@ def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip: str 
     start_time = time.time()
     
     try:
-        logger.info("onboarding_welcome_start",
+        log_info("onboarding_welcome_start",
                    user_id=user_id,
                    wa_id=wa_id,
                    correlation_id=correlation_id,
@@ -202,7 +245,7 @@ def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip: str 
         onboarding_result = asyncio.run(onboarding_service.start_onboarding(user_id, client_ip))
         
         if not onboarding_result:
-            logger.error("onboarding_welcome_no_messages",
+            log_error("onboarding_welcome_no_messages",
                         user_id=user_id)
             return {"status": "error", "message": "Failed to start onboarding"}
         
@@ -210,7 +253,7 @@ def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip: str 
         messages = onboarding_result.get("messages", [])
         
         if not messages:
-            logger.error("onboarding_welcome_empty_messages",
+            log_error("onboarding_welcome_empty_messages",
                         user_id=user_id)
             return {"status": "error", "message": "No messages generated"}
         
@@ -238,7 +281,7 @@ def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip: str 
         
         duration_ms = round((time.time() - start_time) * 1000, 2)
         
-        logger.info("onboarding_welcome_success",
+        log_info("onboarding_welcome_success",
                    user_id=user_id,
                    wa_id=wa_id,
                    messages_sent=sent_count,
@@ -248,12 +291,12 @@ def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip: str 
         
     except Exception as exc:
         duration_ms = round((time.time() - start_time) * 1000, 2)
-        logger.error("onboarding_welcome_error",
-                    user_id=user_id,
-                    wa_id=wa_id,
-                    error=str(exc),
-                    retry_count=self.request.retries,
-                    duration_ms=duration_ms)
+        log_error("onboarding_welcome_error",
+                 user_id=user_id,
+                 wa_id=wa_id,
+                 error=str(exc),
+                 retry_count=self.request.retries,
+                 duration_ms=duration_ms)
         
         # Exponential backoff retry
         retry_delay = 60 * (2 ** self.request.retries)
@@ -281,7 +324,7 @@ def send_onboarding_response(self, user_id: str, wa_id: str, response_message: s
     dedupe_key = create_dedupe_key(user_id, f"response_{response_message}")
     
     try:
-        logger.info("onboarding_response_start",
+        log_info("onboarding_response_start",
                    user_id=user_id,
                    wa_id=wa_id,
                    correlation_id=correlation_id,
@@ -297,7 +340,7 @@ def send_onboarding_response(self, user_id: str, wa_id: str, response_message: s
         duration_ms = round((time.time() - start_time) * 1000, 2)
         
         if success:
-            logger.info("onboarding_response_success",
+            log_info("onboarding_response_success",
                        user_id=user_id,
                        wa_id=wa_id,
                        correlation_id=correlation_id,
@@ -305,7 +348,7 @@ def send_onboarding_response(self, user_id: str, wa_id: str, response_message: s
                        idempotent=True)
             return {"status": "success", "user_id": user_id, "wa_id": wa_id}
         else:
-            logger.error("onboarding_response_failed",
+            log_error("onboarding_response_failed",
                         user_id=user_id,
                         wa_id=wa_id,
                         correlation_id=correlation_id,
@@ -314,7 +357,7 @@ def send_onboarding_response(self, user_id: str, wa_id: str, response_message: s
             
     except Exception as exc:
         duration_ms = round((time.time() - start_time) * 1000, 2)
-        logger.error("onboarding_response_error",
+        log_error("onboarding_response_error",
                     user_id=user_id,
                     wa_id=wa_id,
                     correlation_id=correlation_id,
@@ -347,7 +390,7 @@ def log_onboarding_progress(self, user_id: str, step: str, response: str, succes
     start_time = time.time()
     
     try:
-        logger.info("onboarding_log_start",
+        log_info("onboarding_log_start",
                    user_id=user_id,
                    step=step,
                    success=success,
@@ -369,7 +412,7 @@ def log_onboarding_progress(self, user_id: str, step: str, response: str, succes
         
         duration_ms = round((time.time() - start_time) * 1000, 2)
         
-        logger.info("onboarding_log_success",
+        log_info("onboarding_log_success",
                    user_id=user_id,
                    step=step,
                    duration_ms=duration_ms)
@@ -378,7 +421,7 @@ def log_onboarding_progress(self, user_id: str, step: str, response: str, succes
         
     except Exception as exc:
         duration_ms = round((time.time() - start_time) * 1000, 2)
-        logger.error("onboarding_log_error",
+        log_error("onboarding_log_error",
                     user_id=user_id,
                     step=step,
                     error=str(exc),
