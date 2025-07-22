@@ -1,7 +1,7 @@
 """
 Celery tasks for onboarding message sending
 Handles WhatsApp message delivery with retry logic and exponential backoff
-Optimized for asyncio worker pool with structured logging
+Uses asyncio.run() for async WhatsApp API calls within synchronous tasks
 """
 
 from celery import current_app
@@ -9,6 +9,7 @@ from celery.exceptions import Retry
 from typing import Dict, Any, Optional
 import time
 import hashlib
+import asyncio
 
 # Use structured logging
 try:
@@ -103,10 +104,10 @@ async def shadow_write_to_dispatcher(supabase_service, user_id: str, message_typ
         return None
 
 @current_app.task(bind=True, max_retries=3, default_retry_delay=60)
-async def send_onboarding_message(self, wa_id: str, message: str, message_type: str = "onboarding", user_id: str = None):
+def send_onboarding_message(self, wa_id: str, message: str, message_type: str = "onboarding", user_id: str = None):
     """
     Send onboarding message via WhatsApp with Redis idempotency
-    Designed for asyncio worker pool (-P asyncio)
+    Uses asyncio.run() for async operations within synchronous task
     
     Args:
         wa_id: WhatsApp ID to send message to
@@ -132,7 +133,7 @@ async def send_onboarding_message(self, wa_id: str, message: str, message_type: 
         whatsapp_service = WhatsAppService()
         
         # Send message with idempotency guard
-        success = await send_message_once(whatsapp_service, wa_id, message, dedupe_key)
+        success = asyncio.run(send_message_once(whatsapp_service, wa_id, message, dedupe_key))
         
         duration_ms = round((time.time() - start_time) * 1000, 2)
         
@@ -169,10 +170,10 @@ async def send_onboarding_message(self, wa_id: str, message: str, message_type: 
         )
 
 @current_app.task(bind=True, max_retries=3, default_retry_delay=60)
-async def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip: str = None, correlation_id: str = None):
+def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip: str = None, correlation_id: str = None):
     """
     Send welcome message + first question for onboarding
-    Designed for asyncio worker pool (-P asyncio)
+    Uses asyncio.run() for async operations within synchronous task
     
     Args:
         user_id: User ID from database
@@ -197,8 +198,8 @@ async def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip
         from app.services.onboarding_service import OnboardingService
         onboarding_service = OnboardingService(supabase_service)
         
-        # Use start_onboarding method (no asyncio.run with asyncio worker)
-        onboarding_result = await onboarding_service.start_onboarding(user_id, client_ip)
+        # Use start_onboarding method with asyncio.run
+        onboarding_result = asyncio.run(onboarding_service.start_onboarding(user_id, client_ip))
         
         if not onboarding_result:
             logger.error("onboarding_welcome_no_messages",
@@ -218,9 +219,9 @@ async def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip
         for i, message in enumerate(messages):
             if message:
                 # Shadow-write to dispatcher
-                message_id = await shadow_write_to_dispatcher(
+                message_id = asyncio.run(shadow_write_to_dispatcher(
                     supabase_service, user_id, f"onboarding_welcome", message, delay_seconds=i*2
-                )
+                ))
                 if message_id:
                     dispatcher_message_ids.append(message_id)
 
@@ -230,7 +231,7 @@ async def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip
             if message:
                 # Create unique dedupe key for each message in flow
                 flow_dedupe_key = create_dedupe_key(user_id, f"welcome_flow_{i}_{message}")
-                success = await send_message_once(whatsapp_service, wa_id, message, flow_dedupe_key)
+                success = asyncio.run(send_message_once(whatsapp_service, wa_id, message, flow_dedupe_key))
                 if not success:
                     raise Exception(f"Failed to send message {i+1}")
                 sent_count += 1
@@ -264,10 +265,10 @@ async def send_onboarding_welcome_flow(self, user_id: str, wa_id: str, client_ip
         )
 
 @current_app.task(bind=True, max_retries=3, default_retry_delay=30)
-async def send_onboarding_response(self, user_id: str, wa_id: str, response_message: str, correlation_id: str = None):
+def send_onboarding_response(self, user_id: str, wa_id: str, response_message: str, correlation_id: str = None):
     """
     Send onboarding response message (next question or completion) with idempotency
-    Designed for asyncio worker pool (-P asyncio)
+    Uses asyncio.run() for async operations within synchronous task
     
     Args:
         user_id: User ID from database
@@ -291,7 +292,7 @@ async def send_onboarding_response(self, user_id: str, wa_id: str, response_mess
         whatsapp_service = WhatsAppService()
         
         # Send response message with idempotency guard
-        success = await send_message_once(whatsapp_service, wa_id, response_message, dedupe_key)
+        success = asyncio.run(send_message_once(whatsapp_service, wa_id, response_message, dedupe_key))
         
         duration_ms = round((time.time() - start_time) * 1000, 2)
         
@@ -331,10 +332,10 @@ async def send_onboarding_response(self, user_id: str, wa_id: str, response_mess
         )
 
 @current_app.task(bind=True, max_retries=5, default_retry_delay=120, acks_late=True)
-async def log_onboarding_progress(self, user_id: str, step: str, response: str, success: bool):
+def log_onboarding_progress(self, user_id: str, step: str, response: str, success: bool):
     """
     Log onboarding progress to database
-    Designed for asyncio worker pool (-P asyncio)
+    Uses asyncio.run() for async operations within synchronous task
     Increased retries for database operations
     
     Args:
@@ -359,12 +360,12 @@ async def log_onboarding_progress(self, user_id: str, step: str, response: str, 
         # Log the conversation
         message_type = f"onboarding_{step}"
         
-        # Log conversation (no asyncio.run with asyncio worker)
-        result = await supabase_service.log_conversation(
+        # Log conversation with asyncio.run
+        result = asyncio.run(supabase_service.log_conversation(
             user_id, 
             response, 
             message_type
-        )
+        ))
         
         duration_ms = round((time.time() - start_time) * 1000, 2)
         
