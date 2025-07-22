@@ -39,15 +39,56 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 
+# Helper function to handle both structlog and standard logging
+def log_info(message, **kwargs):
+    if 'structlog' in str(type(logger)):
+        logger.info(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.info(f"{message}: {extras}")
+        else:
+            logger.info(message)
+
+def log_warning(message, **kwargs):
+    if 'structlog' in str(type(logger)):
+        logger.warning(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.warning(f"{message}: {extras}")
+        else:
+            logger.warning(message)
+
+def log_error(message, **kwargs):
+    if 'structlog' in str(type(logger)):
+        logger.error(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.error(f"{message}: {extras}")
+        else:
+            logger.error(message)
+
+def log_debug(message, **kwargs):
+    if 'structlog' in str(type(logger)):
+        logger.debug(message, **kwargs)
+    else:
+        if kwargs:
+            extras = ', '.join(f"{k}={v}" for k, v in kwargs.items())
+            logger.debug(f"{message}: {extras}")
+        else:
+            logger.debug(message)
+
 # Redis client for idempotency
 try:
     import redis
     redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
     # Test connection
     redis_client.ping()
-    logger.info("redis_connection_established", url=os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    log_info("redis_connection_established", url=os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 except Exception as e:
-    logger.warning("redis_connection_failed", error=str(e), message="Idempotency disabled")
+    log_warning("redis_connection_failed", error=str(e), message="Idempotency disabled")
     redis_client = None
 
 # Create Celery app
@@ -66,9 +107,9 @@ celery_app = Celery(
 # Force task discovery and registration
 try:
     from worker.tasks import daily_messages, weekly_reports, email_notifications, onboarding_tasks
-    logger.info("celery_task_modules_imported")
+    log_info("celery_task_modules_imported")
 except ImportError as e:
-    logger.error("celery_task_import_error", error=str(e))
+    log_error("celery_task_import_error", error=str(e))
 
 # Celery configuration
 celery_app.conf.update(
@@ -123,100 +164,100 @@ celery_app.conf.task_default_queue = 'celery'  # Use standard celery queue
 # Run configuration test on import (for Railway deployment)
 def run_diagnostics():
     """Run diagnostics when module is imported"""
-    logger.info("celery_configuration_test_start")
+    log_info("celery_configuration_test_start")
     
     # Check task registration
     all_tasks = list(celery_app.tasks.keys())
-    logger.info("celery_registered_tasks_count", total_tasks=len(all_tasks))
+    log_info("celery_registered_tasks_count", total_tasks=len(all_tasks))
 
     daily_tasks = [name for name in all_tasks if 'daily_messages' in name]
-    logger.info("celery_daily_tasks_found", daily_tasks_count=len(daily_tasks))
+    log_info("celery_daily_tasks_found", daily_tasks_count=len(daily_tasks))
     for task in daily_tasks:
-        logger.debug("celery_daily_task_registered", task_name=task)
+        log_debug("celery_daily_task_registered", task_name=task)
 
     # Check beat schedule
     schedule = celery_app.conf.beat_schedule
-    logger.info("celery_beat_schedule_entries", schedule_count=len(schedule))
+    log_info("celery_beat_schedule_entries", schedule_count=len(schedule))
 
     for name, config in schedule.items():
         if 'personalized' in name or 'weekly' in name or 'cleanup' in name:
-            logger.debug("celery_schedule_entry", name=name, task=config['task'])
+            log_debug("celery_schedule_entry", name=name, task=config['task'])
     
     # Check specific tasks
     target_tasks = [
         'worker.tasks.daily_messages.process_personalized_messages'
     ]
 
-    logger.info("celery_driver_task_check")
+    log_info("celery_driver_task_check")
     for task_name in target_tasks:
         if task_name in all_tasks:
-            logger.debug("celery_driver_task_registered", task_name=task_name)
+            log_debug("celery_driver_task_registered", task_name=task_name)
         else:
-            logger.warning("celery_driver_task_missing", task_name=task_name)
-    logger.info("celery_configuration_test_complete")
+            log_warning("celery_driver_task_missing", task_name=task_name)
+    log_info("celery_configuration_test_complete")
 
 # Run diagnostics when imported
 try:
     run_diagnostics()
 except Exception as e:
-    logger.error("celery_diagnostic_failed", error=str(e))
+    log_error("celery_diagnostic_failed", error=str(e))
 
 def test_celery_config():
     """Test Celery configuration for debugging"""
-    logger.info("celery_detailed_diagnostic_start")
+    log_info("celery_detailed_diagnostic_start")
     
     # Check task registration
     all_tasks = list(celery_app.tasks.keys())
-    logger.info("celery_registered_tasks_count", total_tasks=len(all_tasks))
+    log_info("celery_registered_tasks_count", total_tasks=len(all_tasks))
 
     daily_tasks = [name for name in all_tasks if 'daily_messages' in name]
-    logger.info("celery_detailed_daily_tasks", daily_tasks_count=len(daily_tasks))
+    log_info("celery_detailed_daily_tasks", daily_tasks_count=len(daily_tasks))
     for task in daily_tasks:
-        logger.debug("celery_daily_task_registered", task_name=task)
+        log_debug("celery_daily_task_registered", task_name=task)
 
     # Check beat schedule
     schedule = celery_app.conf.beat_schedule
-    logger.info("celery_detailed_schedule_entries", schedule_count=len(schedule))
+    log_info("celery_detailed_schedule_entries", schedule_count=len(schedule))
 
     for name, config in schedule.items():
         if 'personalized' in name or 'weekly' in name or 'cleanup' in name:
-            logger.debug("celery_schedule_entry", name=name, task=config['task'])
+            log_debug("celery_schedule_entry", name=name, task=config['task'])
     
     # Check driver task
     target_tasks = [
         'worker.tasks.daily_messages.process_personalized_messages'
     ]
 
-    logger.info("celery_detailed_driver_check")
+    log_info("celery_detailed_driver_check")
     for task_name in target_tasks:
         if task_name in all_tasks:
-            logger.debug("celery_driver_task_registered", task_name=task_name)
+            log_debug("celery_driver_task_registered", task_name=task_name)
         else:
-            logger.warning("celery_driver_task_missing", task_name=task_name)
+            log_warning("celery_driver_task_missing", task_name=task_name)
 
 def test_manual_task_trigger():
     """Test manual task triggering to verify worker communication"""
-    logger.info("celery_manual_trigger_test_start")
-    logger.info("celery_manual_trigger_test_separator")
+    log_info("celery_manual_trigger_test_start")
+    log_info("celery_manual_trigger_test_separator")
     
     try:
         from worker.tasks.daily_messages import process_personalized_messages
-        logger.info("celery_manual_task_import_success")
+        log_info("celery_manual_task_import_success")
         
         # Trigger driver task manually
-        logger.info("celery_manual_trigger_personalized_messages")
+        log_info("celery_manual_trigger_personalized_messages")
         result = process_personalized_messages.delay()
-        logger.info("celery_manual_task_triggered", task_id=result.id)
+        log_info("celery_manual_task_triggered", task_id=result.id)
         
         # Try to get result
-        logger.info("celery_manual_waiting_for_completion", timeout_seconds=30)
+        log_info("celery_manual_waiting_for_completion", timeout_seconds=30)
         task_result = result.get(timeout=30)
-        logger.info("celery_manual_task_completed", result=task_result)
+        log_info("celery_manual_task_completed", result=task_result)
         
     except Exception as e:
-        logger.error("celery_manual_trigger_failed", error=str(e))
+        log_error("celery_manual_trigger_failed", error=str(e))
     
-    logger.info("celery_manual_trigger_test_separator")
+    log_info("celery_manual_trigger_test_separator")
 
 # Debug functions available for manual testing
 # Call test_manual_task_trigger() manually when debugging
