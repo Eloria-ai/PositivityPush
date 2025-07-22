@@ -6,18 +6,14 @@ Generates and sends personalized weekly reflection reports.
 from celery import shared_task
 from datetime import datetime, timedelta
 import asyncio
-import sys
-import os
 
-# Add the app directory to Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'app'))
-
-from services.ai_coach import AICoachService
-from services.whatsapp_service import WhatsAppService
-from services.supabase_client import SupabaseService
-from services.email_service import EmailService
-from deps import get_supabase_client
-from config import settings
+# Use proper package imports instead of sys.path manipulation
+from app.services.ai_coach import AICoachService
+from app.services.whatsapp_service import WhatsAppService
+from app.services.supabase_client import SupabaseService
+from app.services.email_service import EmailService
+from app.deps import get_supabase_client
+from app.config import settings
 
 # Use structured logging
 try:
@@ -160,7 +156,7 @@ async def _generate_weekly_progress_report(
         """
         
         # Get weekly memories from mem0
-        weekly_memories = await ai_coach.mem0_service.get_memories(subscriber['id'], limit=20)
+        weekly_memories = await ai_coach.mem0_service.get_memories(subscriber['id'])
         
         # Generate the report using AI coach
         response = ai_coach.openai_client.chat.completions.create(
@@ -177,8 +173,8 @@ async def _generate_weekly_progress_report(
         
         # Store this report generation in mem0
         await ai_coach.mem0_service.add_memory(
+            messages=[{"role": "assistant", "content": f"Generated weekly progress report: {report}"}],
             user_id=subscriber['id'],
-            message=f"Generated weekly progress report: {report}",
             metadata={"interaction_type": "weekly_report", "date": datetime.now().isoformat()}
         )
         

@@ -8,18 +8,14 @@ from celery import shared_task
 from datetime import datetime, timedelta
 import time
 import asyncio
-import sys
-import os
 from typing import Optional, Dict, List, Tuple
 
-# Add the app directory to Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'app'))
-
-from services.ai_coach import AICoachService
-from services.whatsapp_service import WhatsAppService
-from services.supabase_client import SupabaseService
-from deps import get_supabase_client
-from config import settings
+# Use proper package imports instead of sys.path manipulation
+from app.services.ai_coach import AICoachService
+from app.services.whatsapp_service import WhatsAppService
+from app.services.supabase_client import SupabaseService
+from app.deps import get_supabase_client
+from app.config import settings
 
 # Configure structured logging for production-ready observability
 try:
@@ -206,13 +202,13 @@ async def _generate_content_by_type(
         elif message_type == 'accountability_checkin':
             return await ai_coach.generate_accountability_checkin(user_id, user_context)
         elif message_type == 'day_planning':
-            return await ai_coach.generate_day_planning_prompt(user_id, user_context)
+            return await ai_coach.generate_day_planning(user_id, user_context)
         elif message_type == 'weekly_reflection':
             return await ai_coach.generate_weekly_reflection(user_id, user_context)
         elif message_type == 'midday_boost':
-            return await ai_coach.generate_midday_boost(user_id, user_context)
+            return await ai_coach.generate_midday_affirmation(user_id, user_context)
         elif message_type == 'evening_wind_down':
-            return await ai_coach.generate_evening_wind_down(user_id, user_context)
+            return await ai_coach.generate_evening_affirmation(user_id, user_context)
         # Onboarding messages (pre-generated content stored in scheduled_messages)
         elif message_type in ['onboarding_welcome', 'onboarding_response', 'onboarding_question']:
             # For onboarding, content is pre-generated and stored in the message record

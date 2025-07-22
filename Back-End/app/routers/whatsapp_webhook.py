@@ -64,8 +64,9 @@ async def whatsapp_webhook(
     """
     
     try:
-        # Extract client IP for timezone detection
+        # Extract client IP and correlation ID for timezone detection and tracing
         client_ip = extract_client_ip(request)
+        correlation_id = getattr(request.state, 'correlation_id', None)
         logger.info(f"Twilio WhatsApp webhook received from IP: {client_ip}")
         
         # Initialize services
@@ -105,7 +106,8 @@ async def whatsapp_webhook(
                 supabase_service,
                 whatsapp_service,
                 ai_coach,
-                client_ip=client_ip
+                client_ip=client_ip,
+                correlation_id=correlation_id
             )
         
         return JSONResponse(content={"status": "success"})
@@ -125,7 +127,8 @@ async def process_twilio_message(
     supabase_service: SupabaseService,
     whatsapp_service: WhatsAppService,
     ai_coach: AICoachService,
-    client_ip: str = None
+    client_ip: str = None,
+    correlation_id: str = None
 ):
     """Process message from Twilio WhatsApp webhook"""
     
@@ -134,12 +137,12 @@ async def process_twilio_message(
     # Check if this is an activation message
     if message_body.startswith("POSITIVITY-PUSH START"):
         await handle_activation_message(
-            from_number, message_body, supabase_service, whatsapp_service, ai_coach
+            from_number, message_body, supabase_service, whatsapp_service, ai_coach, correlation_id
         )
     else:
         # Handle regular coaching conversation - pass the subscription we already found
         await handle_coaching_message_with_subscription(
-            from_number, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach, client_ip=client_ip, message_metadata=None
+            from_number, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach, client_ip=client_ip, message_metadata=None, correlation_id=correlation_id
         )
 
 async def handle_activation_message(
@@ -147,7 +150,8 @@ async def handle_activation_message(
     message_text: str,
     supabase_service: SupabaseService,
     whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService
+    ai_coach: AICoachService,
+    correlation_id: str = None
 ):
     """
     Handle POSITIVITY-PUSH START activation messages
@@ -199,7 +203,7 @@ async def handle_activation_message(
         stored_client_ip = subscription.get("client_ip")
         client_ip = stored_client_ip if stored_client_ip else None
         
-        correlation_id = getattr(request.state, 'correlation_id', None)
+        # correlation_id is now passed as parameter
         
         if client_ip:
             logger.info("activation_using_stored_ip", 
@@ -228,7 +232,7 @@ async def handle_activation_message(
         logger.error("activation_error", 
                     wa_id=wa_id,
                     error=str(e),
-                    correlation_id=getattr(request.state, 'correlation_id', None),
+                    correlation_id=correlation_id,
                     exc_info=True)
         await whatsapp_service.send_message(
             wa_id,
@@ -244,7 +248,8 @@ async def handle_coaching_message_with_subscription(
     whatsapp_service: WhatsAppService,
     ai_coach: AICoachService,
     client_ip: str = None,
-    message_metadata: dict = None
+    message_metadata: dict = None,
+    correlation_id: str = None
 ):
     """
     Handle regular coaching conversation messages with pre-fetched subscription
@@ -299,7 +304,7 @@ async def handle_coaching_message_with_subscription(
         # If in onboarding, enqueue response message and return
         if onboarding_result.get("is_onboarding"):
             response_message = onboarding_result.get("message")
-            correlation_id = getattr(request.state, 'correlation_id', None)
+            # correlation_id is now passed as parameter
             
             if response_message:
                 from worker.tasks.onboarding_tasks import send_onboarding_response

@@ -66,9 +66,9 @@ celery_app = Celery(
 # Force task discovery and registration
 try:
     from worker.tasks import daily_messages, weekly_reports, email_notifications, onboarding_tasks
-    print(f"📦 Successfully imported task modules")
+    logger.info("celery_task_modules_imported")
 except ImportError as e:
-    print(f"❌ Task import error: {e}")
+    logger.error("celery_task_import_error", error=str(e))
 
 # Celery configuration
 celery_app.conf.update(
@@ -123,100 +123,100 @@ celery_app.conf.task_default_queue = 'celery'  # Use standard celery queue
 # Run configuration test on import (for Railway deployment)
 def run_diagnostics():
     """Run diagnostics when module is imported"""
-    print("=== CELERY CONFIGURATION TEST ===")
+    logger.info("celery_configuration_test_start")
     
     # Check task registration
     all_tasks = list(celery_app.tasks.keys())
-    print(f"Total registered tasks: {len(all_tasks)}")
+    logger.info("celery_registered_tasks_count", total_tasks=len(all_tasks))
 
     daily_tasks = [name for name in all_tasks if 'daily_messages' in name]
-    print(f"Daily message tasks found: {len(daily_tasks)}")
+    logger.info("celery_daily_tasks_found", daily_tasks_count=len(daily_tasks))
     for task in daily_tasks:
-        print(f"  ✅ {task}")
+        logger.debug("celery_daily_task_registered", task_name=task)
 
     # Check beat schedule
     schedule = celery_app.conf.beat_schedule
-    print(f"Beat schedule entries: {len(schedule)}")
+    logger.info("celery_beat_schedule_entries", schedule_count=len(schedule))
 
     for name, config in schedule.items():
         if 'personalized' in name or 'weekly' in name or 'cleanup' in name:
-            print(f"  📅 {name}: {config['task']}")
+            logger.debug("celery_schedule_entry", name=name, task=config['task'])
     
     # Check specific tasks
     target_tasks = [
         'worker.tasks.daily_messages.process_personalized_messages'
     ]
 
-    print(f"Driver task registration:")
+    logger.info("celery_driver_task_check")
     for task_name in target_tasks:
         if task_name in all_tasks:
-            print(f"✅ {task_name} - REGISTERED")
+            logger.debug("celery_driver_task_registered", task_name=task_name)
         else:
-            print(f"❌ {task_name} - NOT REGISTERED")
-    print("=== END CELERY TEST ===")
+            logger.warning("celery_driver_task_missing", task_name=task_name)
+    logger.info("celery_configuration_test_complete")
 
 # Run diagnostics when imported
 try:
     run_diagnostics()
 except Exception as e:
-    print(f"Diagnostic failed: {e}")
+    logger.error("celery_diagnostic_failed", error=str(e))
 
 def test_celery_config():
     """Test Celery configuration for debugging"""
-    print("=== CELERY CONFIGURATION TEST ===")
+    logger.info("celery_detailed_diagnostic_start")
     
     # Check task registration
     all_tasks = list(celery_app.tasks.keys())
-    print(f"Total registered tasks: {len(all_tasks)}")
+    logger.info("celery_registered_tasks_count", total_tasks=len(all_tasks))
 
     daily_tasks = [name for name in all_tasks if 'daily_messages' in name]
-    print(f"\nDaily message tasks found: {len(daily_tasks)}")
+    logger.info("celery_detailed_daily_tasks", daily_tasks_count=len(daily_tasks))
     for task in daily_tasks:
-        print(f"  ✅ {task}")
+        logger.debug("celery_daily_task_registered", task_name=task)
 
     # Check beat schedule
     schedule = celery_app.conf.beat_schedule
-    print(f"\nBeat schedule entries: {len(schedule)}")
+    logger.info("celery_detailed_schedule_entries", schedule_count=len(schedule))
 
     for name, config in schedule.items():
         if 'personalized' in name or 'weekly' in name or 'cleanup' in name:
-            print(f"  📅 {name}: {config['task']}")
+            logger.debug("celery_schedule_entry", name=name, task=config['task'])
     
     # Check driver task
     target_tasks = [
         'worker.tasks.daily_messages.process_personalized_messages'
     ]
 
-    print(f"\nDriver task registration:")
+    logger.info("celery_detailed_driver_check")
     for task_name in target_tasks:
         if task_name in all_tasks:
-            print(f"✅ {task_name} - REGISTERED")
+            logger.debug("celery_driver_task_registered", task_name=task_name)
         else:
-            print(f"❌ {task_name} - NOT REGISTERED")
+            logger.warning("celery_driver_task_missing", task_name=task_name)
 
 def test_manual_task_trigger():
     """Test manual task triggering to verify worker communication"""
-    print("\n🧪 MANUAL TASK TRIGGER TEST")
-    print("=" * 40)
+    logger.info("celery_manual_trigger_test_start")
+    logger.info("celery_manual_trigger_test_separator")
     
     try:
         from worker.tasks.daily_messages import process_personalized_messages
-        print("✅ Task import successful")
+        logger.info("celery_manual_task_import_success")
         
         # Trigger driver task manually
-        print("📤 Triggering personalized messages driver task...")
+        logger.info("celery_manual_trigger_personalized_messages")
         result = process_personalized_messages.delay()
-        print(f"✅ Task triggered! ID: {result.id}")
+        logger.info("celery_manual_task_triggered", task_id=result.id)
         
         # Try to get result
-        print("⏳ Waiting for task completion (30s timeout)...")
+        logger.info("celery_manual_waiting_for_completion", timeout_seconds=30)
         task_result = result.get(timeout=30)
-        print(f"🎉 Task completed! Result: {task_result}")
+        logger.info("celery_manual_task_completed", result=task_result)
         
     except Exception as e:
-        print(f"❌ Manual trigger failed: {e}")
+        logger.error("celery_manual_trigger_failed", error=str(e))
     
-    print("=" * 40)
+    logger.info("celery_manual_trigger_test_separator")
 
 # Debug functions available for manual testing
 # Call test_manual_task_trigger() manually when debugging

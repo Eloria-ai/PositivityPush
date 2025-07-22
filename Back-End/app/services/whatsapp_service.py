@@ -31,7 +31,7 @@ class WhatsAppService:
     async def send_message(self, to: str, message: str) -> bool:
         """Send text message via Twilio WhatsApp"""
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
                 # Twilio WhatsApp format: whatsapp:+1234567890
                 formatted_to = f"whatsapp:{to}" if not to.startswith("whatsapp:") else to
                 formatted_from = f"whatsapp:{settings.TWILIO_WHATSAPP_NUMBER}"
@@ -76,7 +76,7 @@ class WhatsAppService:
     ) -> bool:
         """Send template message via WhatsApp"""
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
                 payload = {
                     "messaging_product": "whatsapp",
                     "to": to,
@@ -124,7 +124,7 @@ class WhatsAppService:
     async def mark_message_as_read(self, message_id: str) -> bool:
         """Mark incoming message as read"""
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
                 payload = {
                     "messaging_product": "whatsapp",
                     "status": "read",
@@ -149,7 +149,7 @@ class WhatsAppService:
     async def send_reaction(self, message_id: str, emoji: str, to: str) -> bool:
         """Send reaction to a message"""
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
                 payload = {
                     "messaging_product": "whatsapp",
                     "recipient_type": "individual",

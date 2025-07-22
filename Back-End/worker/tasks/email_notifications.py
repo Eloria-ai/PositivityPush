@@ -7,16 +7,12 @@ from celery import shared_task
 from datetime import datetime, timedelta
 import logging
 import asyncio
-import sys
-import os
 
-# Add the app directory to Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'app'))
-
-from services.email_service import EmailService
-from services.supabase_client import SupabaseService
-from deps import get_supabase_client
-from config import settings
+# Use proper package imports instead of sys.path manipulation
+from app.services.email_service import EmailService
+from app.services.supabase_client import SupabaseService
+from app.deps import get_supabase_client
+from app.config import settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
