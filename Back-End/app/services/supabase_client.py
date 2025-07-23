@@ -86,7 +86,7 @@ class SupabaseService:
         """Get user's scheduling preferences including timezone from subscription"""
         try:
             result = self.client.table("subscribers").select(
-                "preferences, current_timezone, onboarding_completed, onboarding_step"
+                "preferences, current_timezone"
             ).eq("id", user_id).execute()
             if result.data:
                 data = result.data[0]
@@ -96,9 +96,11 @@ class SupabaseService:
                 if data.get("current_timezone"):
                     preferences["current_timezone"] = data["current_timezone"]
                 
-                # Include onboarding status in preferences for easy access
-                preferences["onboarding_completed"] = data.get("onboarding_completed", True)
-                preferences["onboarding_step"] = data.get("onboarding_step")
+                # Ensure onboarding status defaults are set if not in preferences
+                if "onboarding_completed" not in preferences:
+                    preferences["onboarding_completed"] = True
+                if "onboarding_step" not in preferences:
+                    preferences["onboarding_step"] = None
                 
                 return preferences
             return {}

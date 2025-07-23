@@ -103,7 +103,7 @@ def process_personalized_messages(self, batch_size: int = 500) -> Dict:
         
         duration_ms = round((time.time() - start_time) * 1000, 2)
         
-        logger.info(
+        log_info(
             "personalized_messages_sweep",
             messages_claimed=dispatched_count,
             duration_ms=duration_ms,
