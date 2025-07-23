@@ -224,9 +224,13 @@ class OnboardingService:
                         'timezone_updated_at': datetime.utcnow().isoformat()
                     })
                     logger.info(f"Saved timezone: {value}")
+                    # CRITICAL: Update preferences dict so completion counting works correctly
+                    preferences['current_timezone'] = value
                 else:
                     await self.supabase.set_preference_value(user_id, key, value)
                     logger.info(f"Saved preference: {key} = {value}")
+                    # Update preferences dict for completion counting
+                    preferences[key] = value
                 
                 # STEP 3: Generate natural response acknowledging the time
                 ai_response = await self.generate_natural_response(key, value, preferences, user_id)
@@ -399,11 +403,13 @@ class OnboardingService:
             # Check if we have all required items (affirmation times are now fixed)
             all_items = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection', 'current_timezone']
             
-            # Update preferences with new value
+            # Update preferences with new value (preferences dict now properly includes current_timezone from DB)
             preferences[key] = value
             
             # Count completed items
             completed_count = sum(1 for item in all_items if preferences.get(item))
+            
+            logger.debug(f"Completion check - {key}={value}, completed_count={completed_count}/5, preferences={preferences}")
             
             if completed_count >= 5:
                 # Mark onboarding as completed in database immediately

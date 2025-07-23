@@ -83,11 +83,24 @@ class SupabaseService:
     
     # User Preferences Management
     async def get_user_preferences(self, user_id: str) -> Dict[str, Any]:
-        """Get user's scheduling preferences"""
+        """Get user's scheduling preferences including timezone from subscription"""
         try:
-            result = self.client.table("subscribers").select("preferences").eq("id", user_id).execute()
+            result = self.client.table("subscribers").select(
+                "preferences, current_timezone, onboarding_completed, onboarding_step"
+            ).eq("id", user_id).execute()
             if result.data:
-                return result.data[0].get("preferences", {})
+                data = result.data[0]
+                preferences = data.get("preferences", {})
+                
+                # Include timezone in preferences for completion checking
+                if data.get("current_timezone"):
+                    preferences["current_timezone"] = data["current_timezone"]
+                
+                # Include onboarding status in preferences for easy access
+                preferences["onboarding_completed"] = data.get("onboarding_completed", True)
+                preferences["onboarding_step"] = data.get("onboarding_step")
+                
+                return preferences
             return {}
         except Exception as e:
             logger.error(f"Error getting user preferences: {e}")
