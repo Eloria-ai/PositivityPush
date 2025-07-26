@@ -209,6 +209,23 @@ class OnboardingService:
             conversation_history = self.build_conversation_context(preferences)
             logger.debug(f"Conversation context: {conversation_history}")
             
+            # STEP 0: Check if onboarding is already complete BEFORE extracting time
+            all_items = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection', 'current_timezone']
+            completed_count = sum(1 for item in all_items if preferences.get(item))
+            logger.debug(f"Pre-extraction completion check: {completed_count}/5 items, preferences={preferences}")
+            
+            if completed_count >= 5:
+                # All items collected, mark as completed if not already done
+                if not preferences.get("onboarding_completed"):
+                    await self.supabase.mark_onboarding_completed(user_id)
+                    await self.supabase.set_preference_value(user_id, "onboarding_step", None)
+                    logger.info(f"✅ Onboarding completed (pre-extraction check) for user {user_id}")
+                
+                return {
+                    "completed": True,
+                    "message": self.get_completion_message()
+                }
+            
             # STEP 1: Try to extract time from user message directly
             extracted_time = await self.extract_time_from_message(user_message, preferences)
             logger.debug(f"Extracted time: {extracted_time}")
