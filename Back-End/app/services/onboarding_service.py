@@ -201,76 +201,247 @@ class OnboardingService:
     # ==================== CONVERSATIONAL AI ONBOARDING ====================
     
     async def generate_conversational_response(self, user_id: str, user_message: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate conversational AI response with reliable time extraction"""
+        """Generate fully natural conversational AI response like ChatGPT"""
         try:
-            logger.debug(f"Conversational AI - Starting for user {user_id} with message: {user_message}")
+            logger.debug(f"Natural conversation - Starting for user {user_id} with message: {user_message}")
             
-            # Get conversation history for context
-            conversation_history = self.build_conversation_context(preferences)
-            logger.debug(f"Conversation context: {conversation_history}")
+            # Get conversation history for natural context
+            conversation_context = await self.build_natural_conversation_context(user_id, preferences)
             
-            # STEP 0: Check if onboarding is already complete BEFORE extracting time
-            all_items = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection', 'current_timezone']
-            completed_count = sum(1 for item in all_items if preferences.get(item))
-            logger.debug(f"Pre-extraction completion check: {completed_count}/5 items, preferences={preferences}")
+            # Check if onboarding is complete
+            completion_status = await self.check_completion_status(preferences)
             
-            if completed_count >= 5:
-                # All items collected, mark as completed if not already done
+            if completion_status["is_complete"]:
+                # All items collected, mark as completed
                 if not preferences.get("onboarding_completed"):
                     await self.supabase.mark_onboarding_completed(user_id)
                     await self.supabase.set_preference_value(user_id, "onboarding_step", None)
-                    logger.info(f"✅ Onboarding completed (pre-extraction check) for user {user_id}")
+                    logger.info(f"✅ Onboarding completed naturally for user {user_id}")
                 
                 return {
                     "completed": True,
                     "message": self.get_completion_message()
                 }
             
-            # STEP 1: Try to extract time from user message directly
-            extracted_time = await self.extract_time_from_message(user_message, preferences)
-            logger.debug(f"Extracted time: {extracted_time}")
+            # Generate natural AI response and extract information
+            ai_response = await self.generate_natural_ai_response(
+                user_message, 
+                conversation_context, 
+                completion_status
+            )
             
-            if extracted_time:
-                # STEP 2: Save the extracted time
-                key, value = extracted_time
+            # Extract any schedule information from the conversation
+            extracted_info = await self.extract_schedule_from_conversation(
+                user_message, 
+                ai_response.get("response", ""),
+                preferences
+            )
+            
+            # Save any extracted information
+            if extracted_info:
+                await self.save_extracted_information(user_id, extracted_info, preferences)
+                logger.info(f"Extracted and saved: {extracted_info}")
+            
+            return {
+                "completed": False,
+                "message": ai_response.get("response", "Tell me more about your daily routine!")
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in natural conversation: {e}")
+            return {
+                "completed": False,
+                "message": "I'd love to learn about your daily routine! When do you usually like to start planning your day?"
+            }
+    
+    # ==================== NATURAL CONVERSATION METHODS ====================
+    
+    async def build_natural_conversation_context(self, user_id: str, preferences: Dict[str, Any]) -> str:
+        """Build natural conversation context like ChatGPT"""
+        try:
+            # Get recent conversation history
+            conversation_history = await self.supabase.get_recent_conversations(user_id, limit=10)
+            
+            # Build context of what we know
+            known_info = []
+            missing_info = []
+            
+            schedule_items = {
+                'day_planning': 'when they like to plan their day',
+                'accountability_checkin': 'when they want daily check-ins', 
+                'evening_gratitude': 'their bedtime/gratitude time',
+                'weekly_reflection': 'when they want weekly reflections',
+                'current_timezone': 'their timezone/location'
+            }
+            
+            for key, description in schedule_items.items():
+                if preferences.get(key):
+                    known_info.append(f"✅ Know {description}: {preferences[key]}")
+                else:
+                    missing_info.append(f"❓ Need to learn {description}")
+            
+            context = f"""
+You are Maya, a warm and natural AI life coach having a conversation to learn about someone's daily routine.
+
+CONVERSATION GOAL: Learn their schedule preferences naturally through conversation.
+
+WHAT YOU KNOW:
+{chr(10).join(known_info) if known_info else "Nothing yet - just starting the conversation"}
+
+WHAT YOU STILL NEED:
+{chr(10).join(missing_info) if missing_info else "All information collected!"}
+
+CONVERSATION STYLE:
+- Be completely natural and conversational like ChatGPT
+- Ask follow-up questions naturally 
+- Don't sound like you're filling out a form
+- Show genuine interest in their responses
+- Be warm, friendly, and engaging
+- You can gather multiple pieces of information in one response
+- Feel free to relate to what they're saying
+
+RECENT CONVERSATION:
+{chr(10).join([f"User: {msg.get('content', '')}" for msg in conversation_history[-3:]]) if conversation_history else "This is the start of our conversation"}
+"""
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error building conversation context: {e}")
+            return "You are Maya, a friendly AI coach learning about someone's daily routine. Be natural and conversational."
+    
+    async def check_completion_status(self, preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Check what information we have and what's missing"""
+        required_items = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection', 'current_timezone']
+        
+        collected = {}
+        missing = []
+        
+        for item in required_items:
+            if preferences.get(item):
+                collected[item] = preferences[item]
+            else:
+                missing.append(item)
+        
+        return {
+            "is_complete": len(missing) == 0,
+            "collected": collected,
+            "missing": missing,
+            "progress": f"{len(collected)}/5"
+        }
+    
+    async def generate_natural_ai_response(self, user_message: str, context: str, completion_status: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate completely natural AI response like ChatGPT"""
+        try:
+            prompt = f"""
+{context}
+
+USER JUST SAID: "{user_message}"
+
+TASK: Respond naturally as Maya, the AI life coach. Your response should:
+
+1. ACKNOWLEDGE what they said naturally (show you're listening)
+2. If they mentioned any schedule preferences, acknowledge them warmly
+3. Naturally guide the conversation to learn missing information 
+4. Ask follow-up questions that feel organic, not scripted
+5. Be conversational and engaging - like talking to a friend
+
+PROGRESS: {completion_status['progress']} information collected
+MISSING: {', '.join(completion_status['missing']) if completion_status['missing'] else 'Nothing - almost done!'}
+
+STYLE GUIDELINES:
+- Sound completely natural and human
+- Don't use rigid question formats
+- Show genuine interest and enthusiasm  
+- Ask questions that flow from the conversation
+- You can ask about multiple things or dive deeper into one thing
+- Use varied language - don't sound repetitive
+- Be encouraging and positive
+
+Generate a natural, conversational response (max 100 words):
+"""
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are Maya, a warm and natural AI life coach. Respond conversationally like a real person, not a chatbot."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=200,
+                temperature=0.8  # Higher temperature for more natural responses
+            )
+            
+            ai_response = response.choices[0].message.content.strip()
+            return {"response": ai_response}
+            
+        except Exception as e:
+            logger.error(f"Error generating natural AI response: {e}")
+            return {"response": "That's interesting! Tell me more about your daily routine - I'd love to help you create the perfect schedule."}
+    
+    async def extract_schedule_from_conversation(self, user_message: str, ai_response: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract schedule information from natural conversation"""
+        try:
+            # Use LLM to extract any schedule information mentioned
+            prompt = f"""
+You are analyzing a conversation to extract schedule preferences. Extract ANY scheduling information mentioned.
+
+USER MESSAGE: "{user_message}"
+AI RESPONSE: "{ai_response}"
+
+EXTRACT these if mentioned:
+- day_planning: Time they like to plan their day (format as HH:MM)
+- accountability_checkin: Time for daily progress check-ins (format as HH:MM)  
+- evening_gratitude: Bedtime or gratitude time (format as HH:MM)
+- weekly_reflection: Day and time for weekly reflection (format as {{"day": "dayname", "time": "HH:MM AM/PM"}})
+- current_timezone: Their location/timezone (convert to IANA format like Europe/Amsterdam)
+
+EXAMPLES:
+"I usually plan my day at 9am" → {{"day_planning": "09:00"}}
+"I go to bed around 11pm" → {{"evening_gratitude": "23:00"}}
+"Sunday mornings work for me, maybe 10am" → {{"weekly_reflection": {{"day": "sunday", "time": "10:00 AM"}}}}
+"I'm in New York" → {{"current_timezone": "America/New_York"}}
+
+Return JSON with extracted information, or empty {{}} if nothing found:
+"""
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=200,
+                temperature=0.3
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            try:
+                extracted = json.loads(result)
+                return extracted if isinstance(extracted, dict) else {}
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse extraction result: {result}")
+                return {}
                 
-                # Handle timezone specially - store in current_timezone column
+        except Exception as e:
+            logger.error(f"Error extracting schedule from conversation: {e}")
+            return {}
+    
+    async def save_extracted_information(self, user_id: str, extracted_info: Dict[str, Any], preferences: Dict[str, Any]) -> None:
+        """Save extracted information to database"""
+        try:
+            for key, value in extracted_info.items():
                 if key == 'current_timezone':
                     await self.supabase.update_subscription(user_id, {
                         'current_timezone': value,
                         'timezone_updated_at': datetime.utcnow().isoformat()
                     })
-                    logger.info(f"Saved timezone: {value}")
-                    # CRITICAL: Update preferences dict so completion counting works correctly
                     preferences['current_timezone'] = value
                 else:
                     await self.supabase.set_preference_value(user_id, key, value)
-                    logger.info(f"Saved preference: {key} = {value}")
-                    # Update preferences dict for completion counting
                     preferences[key] = value
                 
-                # STEP 3: Generate natural response acknowledging the time
-                ai_response = await self.generate_natural_response(key, value, preferences, user_id)
-                logger.debug(f"Natural response: {ai_response}")
-                
-                return {
-                    "completed": ai_response.get("completed", False),
-                    "message": ai_response.get("message", "Great! What's next?")
-                }
-            else:
-                # No time found - generate a clarifying question
-                clarifying_response = await self.generate_clarifying_response(user_message, preferences, user_id)
-                return {
-                    "completed": False,
-                    "message": clarifying_response
-                }
-            
+                logger.info(f"Saved {key}: {value}")
         except Exception as e:
-            logger.error(f"Error in conversational AI processing: {e}")
-            return {
-                "completed": False,
-                "message": "Tell me a bit about your daily routine - when do you usually start your day?"
-            }
+            logger.error(f"Error saving extracted information: {e}")
     
     async def extract_time_from_message(self, message: str, preferences: Dict[str, Any]) -> Optional[Tuple[str, str]]:
         """Extract time and determine which schedule key it belongs to with correction support"""

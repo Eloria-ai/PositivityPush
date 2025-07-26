@@ -179,6 +179,22 @@ class SupabaseService:
             return []
     
     # Conversation Management
+    async def get_recent_conversations(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent conversation messages for context"""
+        try:
+            result = (
+                self.client.table("conversations")
+                .select("content, ai_response, timestamp")
+                .eq("subscriber_id", user_id)
+                .order("timestamp", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data if result.data else []
+        except Exception as e:
+            logger.error(f"Error getting recent conversations: {e}")
+            return []
+
     async def log_conversation(
         self, 
         subscriber_id: str, 
