@@ -238,10 +238,21 @@ class OnboardingService:
                 preferences
             )
             
+            # Debug logging to understand what's happening
+            logger.info(f"Onboarding extraction debug",
+                       user_message=user_message,
+                       ai_response=ai_response.get("response", ""),
+                       extracted_info=extracted_info,
+                       current_preferences=preferences)
+            
             # Save any extracted information
             if extracted_info:
                 await self.save_extracted_information(user_id, extracted_info, preferences)
                 logger.info(f"Extracted and saved: {extracted_info}")
+            else:
+                logger.warning("No information extracted from user message",
+                              user_message=user_message,
+                              ai_response_snippet=ai_response.get("response", "")[:100])
             
             return {
                 "completed": False,
@@ -391,10 +402,12 @@ Generate a natural, brief response (max 40 words):
         try:
             # Use LLM to extract any schedule information mentioned
             prompt = f"""
-You are analyzing a conversation to extract schedule preferences. Extract ANY scheduling information mentioned.
+You are analyzing a WhatsApp conversation to extract schedule preferences for a coaching app.
 
 USER MESSAGE: "{user_message}"
 AI RESPONSE: "{ai_response}"
+
+TASK: Extract ANY scheduling information mentioned by the user.
 
 EXTRACT these if mentioned:
 - day_planning: Time they like to plan their day (format as "H:MM AM/PM")
@@ -403,25 +416,22 @@ EXTRACT these if mentioned:
 - weekly_reflection: Day and time for weekly reflection (format as {{"day": "dayname", "time": "H:MM AM/PM"}})
 - current_timezone: Their location/timezone (convert to IANA format like Europe/Amsterdam)
 
-IMPORTANT: Use only AM/PM format, never 24-hour format.
+CRITICAL: If the AI is asking about "planning your day" and user says "around 9", this is day_planning time.
 
 EXAMPLES:
-"I usually plan my day at 9am" → {{"day_planning": "9:00 AM"}}
-"around 9" (in context of planning) → {{"day_planning": "9:00 AM"}}
-"maybe 7pm" (in context of check-ins) → {{"accountability_checkin": "7:00 PM"}}
-"I go to bed around 11pm" → {{"evening_gratitude": "11:00 PM"}}
-"around 9" (in context of bedtime) → {{"evening_gratitude": "9:00 PM"}}
-"7" (in context of check-ins) → {{"accountability_checkin": "7:00 PM"}}
-"Sunday mornings work for me, maybe 10am" → {{"weekly_reflection": {{"day": "sunday", "time": "10:00 AM"}}}}
-"I'm in New York" → {{"current_timezone": "America/New_York"}}
+- User: "around 9" + AI asking about planning → {{"day_planning": "9:00 AM"}}
+- User: "mmm at around 9" + AI asking about planning → {{"day_planning": "9:00 AM"}}
+- User: "9" + AI asking about planning → {{"day_planning": "9:00 AM"}}
+- User: "maybe 7pm" + AI asking about check-ins → {{"accountability_checkin": "7:00 PM"}}
+- User: "around 11pm" + AI asking about bedtime → {{"evening_gratitude": "11:00 PM"}}
 
 CONTEXT RULES:
-- When asking about day planning: times like "9" or "around 9" typically mean AM
-- When asking about check-ins: times like "7" or "around 7" typically mean PM  
-- When asking about bedtime: times like "9" or "around 9" typically mean PM
-- Always include "around", "maybe", "about" as valid time indicators
+- If AI mentions "planning" and user gives a time → day_planning (AM)
+- If AI mentions "check-in" and user gives a time → accountability_checkin (PM)
+- If AI mentions "bedtime" and user gives a time → evening_gratitude (PM)
+- "around", "at around", "mmm at around" are all valid time indicators
 
-Return JSON with extracted information, or empty {{}} if nothing found:
+Return ONLY valid JSON with extracted information, or empty {{}} if nothing found:
 """
             
             response = self.openai_client.chat.completions.create(
@@ -435,11 +445,24 @@ Return JSON with extracted information, or empty {{}} if nothing found:
             
             result = response.choices[0].message.content.strip()
             
+            # Log the raw extraction result for debugging
+            logger.info("Time extraction attempt",
+                       user_message=user_message,
+                       ai_response=ai_response[:100] + "..." if len(ai_response) > 100 else ai_response,
+                       raw_extraction_result=result)
+            
             try:
                 extracted = json.loads(result)
-                return extracted if isinstance(extracted, dict) else {}
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse extraction result: {result}")
+                if isinstance(extracted, dict) and extracted:
+                    logger.info("Successfully extracted schedule info", extracted=extracted)
+                    return extracted
+                else:
+                    logger.info("Extraction returned empty result", result=result)
+                    return {}
+            except json.JSONDecodeError as e:
+                logger.error("Failed to parse extraction JSON",
+                           raw_result=result,
+                           json_error=str(e))
                 return {}
                 
         except Exception as e:
