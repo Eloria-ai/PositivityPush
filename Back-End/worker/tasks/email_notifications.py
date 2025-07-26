@@ -5,7 +5,6 @@ Handles welcome emails, activation reminders, and other email communications.
 
 from celery import shared_task
 from datetime import datetime, timedelta
-import logging
 import asyncio
 
 # Use proper package imports instead of sys.path manipulation
@@ -13,10 +12,10 @@ from app.services.email_service import EmailService
 from app.services.supabase_client import SupabaseService
 from app.deps import get_supabase_client
 from app.config import settings
+from app.logging_config import get_logger
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+logger = get_logger("worker.tasks.email_notifications")
 
 @shared_task(bind=True, max_retries=3)
 def send_welcome_email(self, subscription_data):

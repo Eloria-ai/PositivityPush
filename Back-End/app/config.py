@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     
     # Application Settings
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
-    DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    DEBUG: bool = os.getenv("DEBUG", "false" if os.getenv("ENVIRONMENT") == "production" else "true").lower() == "true"
     PORT: int = int(os.getenv("PORT", "8000"))
     
     # Security

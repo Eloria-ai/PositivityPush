@@ -5,9 +5,11 @@ Handles Stripe payment processing and subscription management.
 
 from typing import Dict, Any, Optional
 import stripe
-import logging
 
-logger = logging.getLogger(__name__)
+from app.logging_config import get_logger
+
+# Configure structured logging
+logger = get_logger("app.services.stripe")
 
 class StripeService:
     """Service class for Stripe operations"""

@@ -4,7 +4,6 @@ Collects user preferences for personalized scheduling through WhatsApp conversat
 Uses async webhook + Celery architecture for reliable message delivery
 """
 
-import logging
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 import re
@@ -15,8 +14,10 @@ import openai
 from app.services.supabase_client import SupabaseService
 from app.services.timezone_service import TimezoneService
 from app.config import settings
+from app.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+# Configure structured logging
+logger = get_logger("app.services.onboarding")
 
 class OnboardingStep(Enum):
     """Steps in the onboarding conversation"""

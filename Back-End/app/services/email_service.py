@@ -5,12 +5,13 @@ Handles thank you emails, invoices, and notifications via SendGrid.
 
 import sendgrid
 from sendgrid.helpers.mail import Mail, Email, To, Content
-import logging
 from typing import Dict, Any, Optional
 
 from app.config import settings
+from app.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+# Configure structured logging
+logger = get_logger("app.services.email")
 
 class EmailService:
     """Service class for email operations"""

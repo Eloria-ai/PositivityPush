@@ -71,52 +71,59 @@ class WhatsAppService:
     async def send_template_message(
         self, 
         to: str, 
-        template_name: str, 
-        parameters: list = None
+        template_sid: str, 
+        content_variables: dict = None
     ) -> bool:
-        """Send template message via WhatsApp"""
+        """Send Twilio Content Template message via WhatsApp
+        
+        Args:
+            to: Recipient phone number
+            template_sid: Twilio Content Template SID (e.g., 'HX...')
+            content_variables: Template variables as key-value pairs
+        """
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+                # Twilio WhatsApp format: whatsapp:+1234567890
+                formatted_to = f"whatsapp:{to}" if not to.startswith("whatsapp:") else to
+                formatted_from = f"whatsapp:{settings.TWILIO_WHATSAPP_NUMBER}"
+                
+                # Twilio Content Template format (form data)
                 payload = {
-                    "messaging_product": "whatsapp",
-                    "to": to,
-                    "type": "template",
-                    "template": {
-                        "name": template_name,
-                        "language": {"code": "en_US"}
-                    }
+                    "From": formatted_from,
+                    "To": formatted_to,
+                    "ContentSid": template_sid
                 }
                 
-                if parameters:
-                    payload["template"]["components"] = [
-                        {
-                            "type": "body",
-                            "parameters": parameters
-                        }
-                    ]
+                # Add content variables if provided
+                if content_variables:
+                    # Twilio expects ContentVariables as JSON string
+                    import json
+                    payload["ContentVariables"] = json.dumps(content_variables)
                 
                 response = await client.post(
-                    f"{self.base_url}/messages",
+                    f"{self.base_url}/Messages.json",
                     headers=self.headers,
-                    json=payload
+                    data=payload  # Form data, not JSON
                 )
                 
-                if response.status_code == 200:
+                if response.status_code in [200, 201]:
                     logger.info("whatsapp_template_sent",
                                recipient=to,
-                               template_name=template_name)
+                               template_sid=template_sid,
+                               status_code=response.status_code)
                     return True
                 else:
                     logger.error("whatsapp_template_failed",
                                recipient=to,
-                               template_name=template_name,
+                               template_sid=template_sid,
+                               status_code=response.status_code,
                                error_text=response.text)
                     return False
                     
         except Exception as e:
             logger.error("whatsapp_template_exception",
                         recipient=to,
-                        template_name=template_name,
+                        template_sid=template_sid,
                         error=str(e),
                         exc_info=True)
             return False
