@@ -396,17 +396,29 @@ USER MESSAGE: "{user_message}"
 AI RESPONSE: "{ai_response}"
 
 EXTRACT these if mentioned:
-- day_planning: Time they like to plan their day (format as HH:MM)
-- accountability_checkin: Time for daily progress check-ins (format as HH:MM)  
-- evening_gratitude: Bedtime or gratitude time (format as HH:MM)
-- weekly_reflection: Day and time for weekly reflection (format as {{"day": "dayname", "time": "HH:MM AM/PM"}})
+- day_planning: Time they like to plan their day (format as "H:MM AM/PM")
+- accountability_checkin: Time for daily progress check-ins (format as "H:MM AM/PM")  
+- evening_gratitude: Bedtime or gratitude time (format as "H:MM AM/PM")
+- weekly_reflection: Day and time for weekly reflection (format as {{"day": "dayname", "time": "H:MM AM/PM"}})
 - current_timezone: Their location/timezone (convert to IANA format like Europe/Amsterdam)
 
+IMPORTANT: Use only AM/PM format, never 24-hour format.
+
 EXAMPLES:
-"I usually plan my day at 9am" → {{"day_planning": "09:00"}}
-"I go to bed around 11pm" → {{"evening_gratitude": "23:00"}}
+"I usually plan my day at 9am" → {{"day_planning": "9:00 AM"}}
+"around 9" (in context of planning) → {{"day_planning": "9:00 AM"}}
+"maybe 7pm" (in context of check-ins) → {{"accountability_checkin": "7:00 PM"}}
+"I go to bed around 11pm" → {{"evening_gratitude": "11:00 PM"}}
+"around 9" (in context of bedtime) → {{"evening_gratitude": "9:00 PM"}}
+"7" (in context of check-ins) → {{"accountability_checkin": "7:00 PM"}}
 "Sunday mornings work for me, maybe 10am" → {{"weekly_reflection": {{"day": "sunday", "time": "10:00 AM"}}}}
 "I'm in New York" → {{"current_timezone": "America/New_York"}}
+
+CONTEXT RULES:
+- When asking about day planning: times like "9" or "around 9" typically mean AM
+- When asking about check-ins: times like "7" or "around 7" typically mean PM  
+- When asking about bedtime: times like "9" or "around 9" typically mean PM
+- Always include "around", "maybe", "about" as valid time indicators
 
 Return JSON with extracted information, or empty {{}} if nothing found:
 """

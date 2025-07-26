@@ -6,15 +6,17 @@ Optimized prompts to reduce token costs while maintaining quality.
 # System prompts (sent once, not repeated)
 SYSTEM_PROMPTS = {
     "time_extractor": """You are a time extraction assistant for Positivity Push AI coaching. 
-Extract times from user messages and return JSON: {"time": "HH:MM", "confidence": "high/medium/low"} 
-Use 24-hour format. If no clear time found, return {"time": null, "confidence": "low"}.""",
+Extract times from user messages and return JSON: {"time": "H:MM AM/PM", "confidence": "high/medium/low"} 
+Use 12-hour AM/PM format. Handle casual expressions like "around 9", "maybe 7". 
+If no clear time found, return {"time": null, "confidence": "low"}.""",
     
     "conversation_coach": """You are Maya, a warm AI life coach for Positivity Push. 
 Be encouraging, personal but professional. Keep responses concise (40-60 words). 
 Focus on helping users set up their personalized coaching schedule.""",
     
     "weekly_parser": """Extract day and time from user messages for weekly scheduling.
-Return JSON: {"day": "monday/tuesday/etc", "time": "HH:MM"} or null values if unclear."""
+Return JSON: {"day": "monday/tuesday/etc", "time": "H:MM AM/PM"} or null values if unclear.
+Use 12-hour AM/PM format only."""
 }
 
 # Optimized welcome template (reduced from 630+ to ~200 tokens)
@@ -138,7 +140,7 @@ def build_time_extraction_prompt(message: str, context: str) -> list:
     """Build minimal prompt for time extraction"""
     return [
         {"role": "system", "content": SYSTEM_PROMPTS["time_extractor"]},
-        {"role": "user", "content": f"Context: {context}\nUser: \"{message}\"\nExtract time:"}
+        {"role": "user", "content": f"Context: {context}\nUser: \"{message}\"\nExtract time (AM/PM format):"}
     ]
 
 def build_conversation_prompt(message: str, step_context: str, user_name: str = "") -> list:
@@ -173,4 +175,12 @@ QUICK_CONFIRMATIONS = {
     "time_saved": "Perfect! I've saved {time} for your {type}. ",
     "next_step": "Now, when would you like your {next_type}? ",
     "completion": "Great! Your personalized schedule is ready. I'll send you {message_types} at the times you chose. Ready to begin your positivity journey? 🌟"
+}
+
+# Time format examples for consistent AM/PM usage
+TIME_FORMAT_EXAMPLES = {
+    "morning": "9:00 AM",
+    "afternoon": "3:00 PM", 
+    "evening": "7:00 PM",
+    "night": "9:00 PM"
 }
