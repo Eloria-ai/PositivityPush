@@ -292,13 +292,14 @@ WHAT YOU STILL NEED:
 {chr(10).join(missing_info) if missing_info else "All information collected!"}
 
 CONVERSATION STYLE:
-- Be completely natural and conversational like ChatGPT
-- Ask follow-up questions naturally 
+- Be completely natural and conversational like a real coach
+- Ask ONE thing at a time, not multiple questions
 - Don't sound like you're filling out a form
 - Show genuine interest in their responses
 - Be warm, friendly, and engaging
-- You can gather multiple pieces of information in one response
-- Feel free to relate to what they're saying
+- Focus on building rapport first, schedule details second
+- Keep responses under 40 words
+- Sound like a real person, not a chatbot
 
 RECENT CONVERSATION:
 {chr(10).join([f"User: {msg.get('content', '')}" for msg in conversation_history[-3:]]) if conversation_history else "This is the start of our conversation"}
@@ -340,33 +341,35 @@ USER JUST SAID: "{user_message}"
 TASK: Respond naturally as Maya, the AI life coach. Your response should:
 
 1. ACKNOWLEDGE what they said naturally (show you're listening)
-2. If they mentioned any schedule preferences, acknowledge them warmly
-3. Naturally guide the conversation to learn missing information 
-4. Ask follow-up questions that feel organic, not scripted
-5. Be conversational and engaging - like talking to a friend
+2. If they mentioned any schedule preferences, acknowledge them warmly  
+3. If this is the start, focus on building rapport and understanding their goals
+4. Only ask about schedule details AFTER establishing connection
+5. Ask ONE question at a time, not multiple things
 
 PROGRESS: {completion_status['progress']} information collected
-MISSING: {', '.join(completion_status['missing']) if completion_status['missing'] else 'Nothing - almost done!'}
+
+ONBOARDING PRIORITY:
+1. First few messages: Build rapport, understand their goals/challenges
+2. After rapport: Gradually learn ONE schedule preference at a time
+3. Never overwhelm with multiple questions in one response
 
 STYLE GUIDELINES:
-- Sound completely natural and human
-- Don't use rigid question formats
-- Show genuine interest and enthusiasm  
-- Ask questions that flow from the conversation
-- You can ask about multiple things or dive deeper into one thing
-- Use varied language - don't sound repetitive
-- Be encouraging and positive
+- Sound like a real person having a conversation
+- Keep under 40 words
+- Ask ONE thing at a time
+- Build relationship before gathering data
+- Be warm and encouraging
 
-Generate a natural, conversational response (max 100 words):
+Generate a natural, brief response (max 40 words):
 """
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are Maya, a warm and natural AI life coach. Respond conversationally like a real person, not a chatbot."},
+                    {"role": "system", "content": "You are Maya, a warm and natural AI life coach. Keep responses brief (under 40 words), natural, and focus on ONE thing at a time."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=200,
+                max_tokens=80,
                 temperature=0.8  # Higher temperature for more natural responses
             )
             
