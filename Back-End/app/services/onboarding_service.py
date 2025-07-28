@@ -523,11 +523,15 @@ EXAMPLES:
 - User: "7pm" + AI asking about planning → {{"day_planning": "7:00 PM"}}
 - User: "maybe 7pm" + AI asking about check-ins → {{"accountability_checkin": "7:00 PM"}}
 - User: "around 11pm" + AI asking about bedtime → {{"evening_gratitude": "11:00 PM"}}
+- User: "Mmm something around 7 ?" + AI asking about check-ins → {{"CLARIFY_AMPM": {{"hour": "7", "context": "accountability_checkin"}}}}
+- User: "around 9" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "9", "context": "day_planning"}}}}
+- User: "maybe 8?" + AI asking about bedtime → {{"CLARIFY_AMPM": {{"hour": "8", "context": "evening_gratitude"}}}}
 
 AMBIGUOUS TIME HANDLING:
-- If user says just a number (like "7", "9", "11") WITHOUT AM/PM, return:
-  {{"CLARIFY_AMPM": {{"hour": "7", "context": "day_planning"}}}}
+- If user mentions a time WITHOUT AM/PM (like "7", "around 7", "something around 7", "maybe 9"), return:
+  {{"CLARIFY_AMPM": {{"hour": "7", "context": "accountability_checkin"}}}}
 - This triggers an AM/PM clarification question
+- Extract the number even from phrases like "Mmm something around 7 ?"
 - Only extract complete times (with AM/PM) as actual schedule preferences
 
 AM/PM CLARIFICATION RESPONSES:
