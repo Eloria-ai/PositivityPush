@@ -245,6 +245,22 @@ class OnboardingService:
                        extracted_info=extracted_info,
                        current_preferences=preferences)
             
+            # Check if we need AM/PM clarification
+            if extracted_info and "CLARIFY_AMPM" in extracted_info:
+                clarify_info = extracted_info["CLARIFY_AMPM"]
+                hour = clarify_info["hour"]
+                context = clarify_info["context"]
+                
+                # Generate AM/PM clarification question
+                clarification_message = f"Thanks for sharing '{hour}'! Just to be sure - did you mean {hour} AM or {hour} PM?"
+                
+                logger.info(f"Generated AM/PM clarification for hour {hour} in context {context}")
+                
+                return {
+                    "completed": False,
+                    "message": clarification_message
+                }
+            
             # Save any extracted information
             if extracted_info:
                 await self.save_extracted_information(user_id, extracted_info, preferences)
@@ -419,16 +435,20 @@ EXTRACT these if mentioned:
 CRITICAL: If the AI is asking about "planning your day" and user says "around 9", this is day_planning time.
 
 EXAMPLES:
-- User: "around 9" + AI asking about planning → {{"day_planning": "9:00 AM"}}
-- User: "mmm at around 9" + AI asking about planning → {{"day_planning": "9:00 AM"}}
-- User: "9" + AI asking about planning → {{"day_planning": "9:00 AM"}}
+- User: "7pm" + AI asking about planning → {{"day_planning": "7:00 PM"}}
 - User: "maybe 7pm" + AI asking about check-ins → {{"accountability_checkin": "7:00 PM"}}
 - User: "around 11pm" + AI asking about bedtime → {{"evening_gratitude": "11:00 PM"}}
 
+AMBIGUOUS TIME HANDLING:
+- If user says just a number (like "7", "9", "11") WITHOUT AM/PM, return:
+  {{"CLARIFY_AMPM": {{"hour": "7", "context": "day_planning"}}}}
+- This triggers an AM/PM clarification question
+- Only extract complete times (with AM/PM) as actual schedule preferences
+
 CONTEXT RULES:
-- If AI mentions "planning" and user gives a time → day_planning (AM)
-- If AI mentions "check-in" and user gives a time → accountability_checkin (PM)
-- If AI mentions "bedtime" and user gives a time → evening_gratitude (PM)
+- If AI mentions "planning" and user gives complete time → day_planning
+- If AI mentions "check-in" and user gives complete time → accountability_checkin  
+- If AI mentions "bedtime" and user gives complete time → evening_gratitude
 - "around", "at around", "mmm at around" are all valid time indicators
 
 Return ONLY valid JSON with extracted information, or empty {{}} if nothing found:
@@ -501,6 +521,9 @@ Return ONLY valid JSON with extracted information, or empty {{}} if nothing foun
                 else:
                     parsed_time = await self.parse_time(message, self.get_context_step_for_key(correction_key))
                     if parsed_time:
+                        # Check if we need AM/PM clarification
+                        if parsed_time.startswith("AMBIGUOUS:"):
+                            return ("CLARIFY_AMPM", {"key": correction_key, "hour": parsed_time.split(":")[1]})
                         return (correction_key, parsed_time)
             
             # Check if we're in middle of onboarding - prioritize current step
@@ -535,6 +558,9 @@ Return ONLY valid JSON with extracted information, or empty {{}} if nothing foun
                     else:
                         parsed_time = await self.parse_time(message, self.get_context_step_for_key(current_key))
                         if parsed_time:
+                            # Check if we need AM/PM clarification
+                            if parsed_time.startswith("AMBIGUOUS:"):
+                                return ("CLARIFY_AMPM", {"key": current_key, "hour": parsed_time.split(":")[1]})
                             return (current_key, parsed_time)
             
             # Fallback to finding first missing item (original behavior)
@@ -563,6 +589,9 @@ Return ONLY valid JSON with extracted information, or empty {{}} if nothing foun
                         context_step = self.get_context_step_for_key(key)
                         parsed_time = await self.parse_time(message, context_step)
                         if parsed_time:
+                            # Check if we need AM/PM clarification
+                            if parsed_time.startswith("AMBIGUOUS:"):
+                                return ("CLARIFY_AMPM", {"key": key, "hour": parsed_time.split(":")[1]})
                             return (key, parsed_time)
                     break
             
@@ -1229,19 +1258,14 @@ Return ONLY valid JSON with extracted information, or empty {{}} if nothing foun
             if 13 <= hour <= 23:
                 return f"{hour:02d}:00"
             
-            # For ambiguous hours (1-12), use context
+            # For ambiguous hours (1-12), we need clarification - DON'T assume
             if 1 <= hour <= 12:
-                if context_step == OnboardingStep.DAY_PLANNING:
-                    # Morning context - assume AM
-                    return f"{hour:02d}:00"
-                elif context_step in [OnboardingStep.ACCOUNTABILITY_CHECKIN, OnboardingStep.SLEEP_TIME]:
-                    # Evening context - assume PM
-                    if hour != 12:
-                        hour += 12
-                    return f"{hour:02d}:00"
+                # Return special format to indicate need for AM/PM clarification
+                return f"AMBIGUOUS:{hour:02d}:00"
             
-            # Default to AM for ambiguous cases
-            return f"{hour:02d}:00"
+            # Only accept if hour is 0 (valid 24-hour format)
+            if hour == 0:
+                return "00:00"
         
         # Special cases - anywhere in sentence
         if re.search(r'\b(noon|12pm|12 pm)\b', message):
