@@ -9,6 +9,7 @@ from datetime import datetime
 import re
 from enum import Enum
 import json
+import time
 import openai
 
 from app.services.supabase_client import SupabaseService
@@ -199,6 +200,73 @@ class OnboardingService:
             logger.error(f"Error checking onboarding status: {e}")
             return False
     
+    async def handle_ampm_clarification(self, user_message: str, pending_clarification: Dict[str, Any], user_id: str, preferences: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Handle AM/PM clarification responses from users"""
+        try:
+            hour = pending_clarification.get("hour")
+            context = pending_clarification.get("context", "day_planning")
+            
+            # Check if user is responding with AM/PM
+            message_lower = user_message.lower().strip()
+            
+            # Pattern matching for AM/PM responses
+            if re.search(r'\b(am|a\.m\.?)\b', message_lower):
+                # User said AM
+                time_value = f"{hour}:00 AM"
+                period = "AM"
+            elif re.search(r'\b(pm|p\.m\.?)\b', message_lower):
+                # User said PM  
+                time_value = f"{hour}:00 PM"
+                period = "PM"
+            elif message_lower in ["am", "pm"]:
+                # Just "AM" or "PM"
+                period = message_lower.upper()
+                time_value = f"{hour}:00 {period}"
+            else:
+                # Not an AM/PM response, continue normal processing
+                return None
+            
+            # Clear the pending clarification
+            await self.supabase.set_preference_value(user_id, "pending_clarification", None)
+            
+            # Save the extracted time
+            await self.supabase.set_preference_value(user_id, context, time_value)
+            preferences[context] = time_value
+            
+            logger.info(f"Resolved AM/PM clarification: {hour} {period} -> {context}: {time_value}")
+            
+            # Generate acknowledgment and next question
+            acknowledgment = f"Perfect! I'll send you {self.get_context_description(context)} at {time_value}."
+            
+            # Check completion and get next question
+            completion_status = await self.check_completion_status(preferences)
+            if completion_status["is_complete"]:
+                await self.supabase.mark_onboarding_completed(user_id)
+                await self.supabase.set_preference_value(user_id, "onboarding_step", None)
+                return {
+                    "completed": True,
+                    "message": f"{acknowledgment}\n\n{self.get_completion_message()}"
+                }
+            
+            next_question = await self.get_next_question(preferences)
+            return {
+                "completed": False,
+                "message": f"{acknowledgment} {next_question}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error handling AM/PM clarification: {e}")
+            return None
+    
+    def get_context_description(self, context: str) -> str:
+        """Get user-friendly description for context"""
+        descriptions = {
+            "day_planning": "daily planning messages",
+            "accountability_checkin": "accountability check-ins",
+            "evening_gratitude": "evening gratitude reminders"
+        }
+        return descriptions.get(context, "messages")
+    
     # ==================== CONVERSATIONAL AI ONBOARDING ====================
     
     async def generate_conversational_response(self, user_id: str, user_message: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +299,16 @@ class OnboardingService:
                 completion_status
             )
             
+            # Check if we're waiting for AM/PM clarification
+            pending_clarification = preferences.get("pending_clarification")
+            if pending_clarification and isinstance(pending_clarification, dict):
+                # Check if user is responding with AM/PM
+                clarification_response = await self.handle_ampm_clarification(
+                    user_message, pending_clarification, user_id, preferences
+                )
+                if clarification_response:
+                    return clarification_response
+            
             # Extract any schedule information from the conversation
             extracted_info = await self.extract_schedule_from_conversation(
                 user_message, 
@@ -250,6 +328,13 @@ class OnboardingService:
                 clarify_info = extracted_info["CLARIFY_AMPM"]
                 hour = clarify_info["hour"]
                 context = clarify_info["context"]
+                
+                # Store the pending clarification state
+                await self.supabase.set_preference_value(user_id, "pending_clarification", {
+                    "hour": hour,
+                    "context": context,
+                    "timestamp": time.time()
+                })
                 
                 # Generate AM/PM clarification question
                 clarification_message = f"Thanks for sharing '{hour}'! Just to be sure - did you mean {hour} AM or {hour} PM?"
@@ -444,6 +529,13 @@ AMBIGUOUS TIME HANDLING:
   {{"CLARIFY_AMPM": {{"hour": "7", "context": "day_planning"}}}}
 - This triggers an AM/PM clarification question
 - Only extract complete times (with AM/PM) as actual schedule preferences
+
+AM/PM CLARIFICATION RESPONSES:
+- If AI previously asked "7 AM or 7 PM?" and user responds with "AM", "am", "7am", "7 AM", etc., extract as:
+  {{"day_planning": "7:00 AM"}}
+- If user responds with "PM", "pm", "7pm", "7 PM", etc., extract as:
+  {{"day_planning": "7:00 PM"}}
+- Look for pattern where AI mentions "AM or PM" and user gives AM/PM clarification
 
 CONTEXT RULES:
 - If AI mentions "planning" and user gives complete time → day_planning
