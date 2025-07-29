@@ -547,75 +547,32 @@ Generate a natural, brief response (max 40 words):
     async def extract_schedule_from_conversation(self, user_message: str, ai_response: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
         """Extract schedule information from natural conversation"""
         try:
-            # Use LLM to extract any schedule information mentioned
+            # Simplified, direct prompt
             prompt = f"""
-You are analyzing a WhatsApp conversation to extract schedule preferences for a coaching app.
+User said: "{user_message}"
+AI response: "{ai_response}"
 
-USER MESSAGE: "{user_message}"
-AI RESPONSE: "{ai_response}"
+Extract time information. Rules:
+1. If user mentions time WITH AM/PM → extract it directly
+2. If user mentions time WITHOUT AM/PM → needs clarification
 
-TASK: Extract ANY scheduling information mentioned by the user.
+Examples:
+- "At 8" (no AM/PM) → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+- "7pm" (has AM/PM) → {{"day_planning": "7:00 PM"}}
 
-EXTRACT these if mentioned:
-- day_planning: Time they like to plan their day (format as "H:MM AM/PM")
-- accountability_checkin: Time for daily progress check-ins (format as "H:MM AM/PM")  
-- evening_gratitude: Bedtime or gratitude time (format as "H:MM AM/PM")
-- weekly_reflection: Day and time for weekly reflection (format as {{"day": "dayname", "time": "H:MM AM/PM"}})
-- current_timezone: Their location/timezone (convert to IANA format like Europe/Amsterdam)
+Context: If AI asks about "planning" use "day_planning", if "check-in" use "accountability_checkin"
 
-CRITICAL: If the AI is asking about "planning your day" and user says "Around 8", "around 8", etc., this needs AM/PM clarification for day_planning context.
-
-EXAMPLES - COMPLETE TIMES (EXTRACT DIRECTLY):
-- User: "7pm" + AI asking about planning → {{"day_planning": "7:00 PM"}}
-- User: "maybe 7pm" + AI asking about check-ins → {{"accountability_checkin": "7:00 PM"}}
-- User: "around 11pm" + AI asking about bedtime → {{"evening_gratitude": "11:00 PM"}}
-
-EXAMPLES - AMBIGUOUS TIMES (NEED CLARIFICATION):
-- User: "At 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- User: "at 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- User: "Around 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- User: "Mmm something around 7 ?" + AI asking about check-ins → {{"CLARIFY_AMPM": {{"hour": "7", "context": "accountability_checkin"}}}}
-- User: "around 9" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "9", "context": "day_planning"}}}}
-- User: "maybe 8?" + AI asking about bedtime → {{"CLARIFY_AMPM": {{"hour": "8", "context": "evening_gratitude"}}}}
-- User: "8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- User: "I think 7" + AI asking about check-ins → {{"CLARIFY_AMPM": {{"hour": "7", "context": "accountability_checkin"}}}}
-
-AMBIGUOUS TIME HANDLING:
-- ANY TIME WITHOUT AM/PM NEEDS CLARIFICATION: "At 8", "at 8", "Around 8", "8", "maybe 7", "something around 9", "I think 7"
-- Extract the number and return: {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- Look at the AI's question to determine context (planning=day_planning, check-in=accountability_checkin, bedtime=evening_gratitude)
-- This triggers an AM/PM clarification question
-- NEVER extract ambiguous times as complete preferences - they MUST be clarified first
-
-MANDATORY PATTERNS TO DETECT:
-- "At 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- "at 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- "Around 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- ANY number without AM/PM when AI is asking about time → NEEDS CLARIFICATION
-
-AM/PM CLARIFICATION RESPONSES:
-- If AI previously asked "7 AM or 7 PM?" and user responds with "AM", "am", "7am", "7 AM", etc., extract as:
-  {{"day_planning": "7:00 AM"}}
-- If user responds with "PM", "pm", "7pm", "7 PM", etc., extract as:
-  {{"day_planning": "7:00 PM"}}
-- Look for pattern where AI mentions "AM or PM" and user gives AM/PM clarification
-
-CONTEXT RULES:
-- If AI mentions "planning" and user gives complete time → day_planning
-- If AI mentions "check-in" and user gives complete time → accountability_checkin  
-- If AI mentions "bedtime" and user gives complete time → evening_gratitude
-- "around", "at around", "mmm at around" are all valid time indicators
-
-Return ONLY valid JSON with extracted information, or empty {{}} if nothing found:
+Return JSON or {{}}:
 """
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
+                    {"role": "system", "content": "You are a time extraction expert. Return only valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=200,
-                temperature=0.3
+                max_tokens=100,
+                temperature=0.1
             )
             
             result = response.choices[0].message.content.strip()
