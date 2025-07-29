@@ -317,13 +317,17 @@ async def handle_coaching_message_with_subscription(
             # correlation_id is now passed as parameter
             
             if response_message:
+                logger.info(f"DISPATCHING CELERY TASK: message='{response_message}' to wa_id={wa_id}")
                 from worker.tasks.onboarding_tasks import send_onboarding_response
-                send_onboarding_response.delay(
+                task = send_onboarding_response.delay(
                     subscription["id"], 
                     wa_id, 
                     response_message,
                     correlation_id=correlation_id
                 )
+                logger.info(f"CELERY TASK DISPATCHED: task_id={task.id}")
+            else:
+                logger.error(f"NO RESPONSE MESSAGE TO SEND: onboarding_result={onboarding_result}")
             
             # Onboarding completion is now handled internally by OnboardingService
             # No need for external completion logic - service manages its own state
