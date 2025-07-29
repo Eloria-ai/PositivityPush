@@ -407,7 +407,12 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
             }
             
         except Exception as e:
-            logger.error(f"Error in natural conversation: {e}")
+            logger.error(f"CRITICAL: Error in natural conversation processing: {e}")
+            logger.error(f"User ID: {user_id}")
+            logger.error(f"User message: {user_message}")
+            logger.error(f"Preferences: {preferences}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return {
                 "completed": False,
                 "message": "I'd love to learn about your daily routine! When do you usually like to start planning your day?"
@@ -609,7 +614,12 @@ Return JSON or {{}}:
                 return {}
                 
         except Exception as e:
-            logger.error(f"Error extracting schedule from conversation: {e}")
+            logger.error(f"CRITICAL: Error extracting schedule from conversation: {e}")
+            logger.error(f"User message: {user_message}")
+            logger.error(f"AI response: {ai_response}")
+            logger.error(f"Full error details: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {}
     
     async def fallback_time_extraction(self, user_message: str, ai_response: str) -> Dict[str, Any]:

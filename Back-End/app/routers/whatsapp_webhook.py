@@ -295,11 +295,21 @@ async def handle_coaching_message_with_subscription(
         
         # Check if user is in onboarding process
         logger.info(f"Checking onboarding status for user {subscription['id']}")
-        onboarding_service = OnboardingService(supabase_service)
-        onboarding_result = await onboarding_service.process_webhook_message(
-            subscription["id"], wa_id, message_text
-        )
-        logger.debug(f"Onboarding result: {onboarding_result}")
+        try:
+            onboarding_service = OnboardingService(supabase_service)
+            onboarding_result = await onboarding_service.process_webhook_message(
+                subscription["id"], wa_id, message_text
+            )
+            logger.info(f"Onboarding result: {onboarding_result}")
+        except Exception as onboarding_error:
+            logger.error(f"CRITICAL: Onboarding service failed for user {subscription['id']}: {onboarding_error}")
+            # Send error message to user and continue
+            await whatsapp_service.send_message(
+                wa_id,
+                "I'm having a technical issue right now. Let me try to help you anyway!"
+            )
+            # Set a default result to prevent webhook from failing
+            onboarding_result = {"is_onboarding": False, "completed": False}
         
         # If in onboarding, enqueue response message and return
         if onboarding_result.get("is_onboarding"):
