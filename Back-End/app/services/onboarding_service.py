@@ -517,22 +517,28 @@ EXTRACT these if mentioned:
 - weekly_reflection: Day and time for weekly reflection (format as {{"day": "dayname", "time": "H:MM AM/PM"}})
 - current_timezone: Their location/timezone (convert to IANA format like Europe/Amsterdam)
 
-CRITICAL: If the AI is asking about "planning your day" and user says "around 9", this is day_planning time.
+CRITICAL: If the AI is asking about "planning your day" and user says "Around 8", "around 8", etc., this needs AM/PM clarification for day_planning context.
 
-EXAMPLES:
+EXAMPLES - COMPLETE TIMES (EXTRACT DIRECTLY):
 - User: "7pm" + AI asking about planning → {{"day_planning": "7:00 PM"}}
 - User: "maybe 7pm" + AI asking about check-ins → {{"accountability_checkin": "7:00 PM"}}
 - User: "around 11pm" + AI asking about bedtime → {{"evening_gratitude": "11:00 PM"}}
+
+EXAMPLES - AMBIGUOUS TIMES (NEED CLARIFICATION):
+- User: "Around 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
 - User: "Mmm something around 7 ?" + AI asking about check-ins → {{"CLARIFY_AMPM": {{"hour": "7", "context": "accountability_checkin"}}}}
 - User: "around 9" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "9", "context": "day_planning"}}}}
 - User: "maybe 8?" + AI asking about bedtime → {{"CLARIFY_AMPM": {{"hour": "8", "context": "evening_gratitude"}}}}
+- User: "8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
 
 AMBIGUOUS TIME HANDLING:
-- If user mentions a time WITHOUT AM/PM (like "7", "around 7", "something around 7", "maybe 9"), return:
-  {{"CLARIFY_AMPM": {{"hour": "7", "context": "accountability_checkin"}}}}
+- ANY TIME WITHOUT AM/PM NEEDS CLARIFICATION: "Around 8", "8", "maybe 7", "something around 9"
+- Extract the number and return: {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+- Look at the AI's question to determine context (planning=day_planning, check-in=accountability_checkin, bedtime=evening_gratitude)
 - This triggers an AM/PM clarification question
-- Extract the number even from phrases like "Mmm something around 7 ?"
-- Only extract complete times (with AM/PM) as actual schedule preferences
+- NEVER extract ambiguous times as complete preferences - they MUST be clarified first
+
+MANDATORY: If you see "Around 8" and AI is asking about planning, you MUST return {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
 
 AM/PM CLARIFICATION RESPONSES:
 - If AI previously asked "7 AM or 7 PM?" and user responds with "AM", "am", "7am", "7 AM", etc., extract as:
