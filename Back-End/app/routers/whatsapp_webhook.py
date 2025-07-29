@@ -80,12 +80,14 @@ async def whatsapp_webhook(
         
         # Extract message data from Twilio format
         message_body = form_data.get("Body", "")
-        from_number = form_data.get("From", "")
+        from_number_raw = form_data.get("From", "")
         to_number = form_data.get("To", "")
         
-        # Keep full WhatsApp format for consistency (whatsapp:+1234567890)
-        # This ensures database lookups and message sending use the same format
-        logger.info(f"Raw Twilio numbers - From: {from_number}, To: {to_number}")
+        # Store both formats - raw for message sending, clean for database lookup
+        from_number_full = from_number_raw  # Keep whatsapp:+31657779475 for sending
+        from_number = from_number_raw.replace("whatsapp:", "") if from_number_raw else ""  # +31657779475 for DB lookup
+        
+        logger.info(f"Phone number formats - Raw: {from_number_raw}, DB lookup: {from_number}, Sending: {from_number_full}")
         
         logger.info(f"Message from {from_number}: {message_body}")
         
@@ -100,7 +102,8 @@ async def whatsapp_webhook(
             
             await process_twilio_message(
                 message_body,
-                from_number,
+                from_number,  # Clean format for DB operations
+                from_number_full,  # Full format for message sending
                 to_number,
                 subscription,
                 supabase_service,
@@ -121,7 +124,8 @@ async def whatsapp_webhook(
 
 async def process_twilio_message(
     message_body: str,
-    from_number: str,
+    from_number: str,  # Clean format for DB operations (+31657779475)
+    from_number_full: str,  # Full format for message sending (whatsapp:+31657779475)
     to_number: str,
     subscription: dict,
     supabase_service: SupabaseService,
@@ -140,9 +144,9 @@ async def process_twilio_message(
             from_number, message_body, supabase_service, whatsapp_service, ai_coach, correlation_id
         )
     else:
-        # Handle regular coaching conversation - pass the subscription we already found
+        # Handle regular coaching conversation - use full format for message sending
         await handle_coaching_message_with_subscription(
-            from_number, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach, client_ip=client_ip, message_metadata=None, correlation_id=correlation_id
+            from_number_full, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach, client_ip=client_ip, message_metadata=None, correlation_id=correlation_id
         )
 
 async def handle_activation_message(
@@ -188,12 +192,11 @@ async def handle_activation_message(
             )
             return
         
-        # Activate subscription - ensure wa_id is stored in full WhatsApp format
-        wa_id_full = wa_id if wa_id.startswith("whatsapp:") else f"whatsapp:{wa_id}"
+        # Activate subscription - store wa_id in clean format for consistency with existing data
         await supabase_service.update_subscription(
             subscription["id"],
             {
-                "wa_id": wa_id_full,
+                "wa_id": wa_id,
                 "status": "active",
                 "activated_at": "now()"
             }
