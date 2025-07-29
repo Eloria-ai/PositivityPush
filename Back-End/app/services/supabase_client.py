@@ -184,7 +184,7 @@ class SupabaseService:
         try:
             result = (
                 self.client.table("conversations")
-                .select("content, ai_response, timestamp")
+                .select("content, message_type, timestamp")
                 .eq("subscriber_id", user_id)
                 .order("timestamp", desc=True)
                 .limit(limit)
