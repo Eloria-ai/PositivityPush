@@ -98,9 +98,9 @@ async def send_message_once(whatsapp_service, wa_id: str, message: str, dedupe_k
     # Send message
     success = await whatsapp_service.send_message(wa_id, message)
     
-    # Mark as sent if successful (1 hour TTL)
+    # Mark as sent if successful (30 seconds TTL for testing)
     if success:
-        redis.setex(dedupe_key, 3600, "sent")
+        redis.setex(dedupe_key, 30, "sent")
         log_info("message_dedupe_cached", 
                 dedupe_key=dedupe_key)
     
