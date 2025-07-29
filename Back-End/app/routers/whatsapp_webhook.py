@@ -83,9 +83,9 @@ async def whatsapp_webhook(
         from_number = form_data.get("From", "")
         to_number = form_data.get("To", "")
         
-        # Clean phone numbers (remove "whatsapp:" prefix)
-        from_number = from_number.replace("whatsapp:", "") if from_number else ""
-        to_number = to_number.replace("whatsapp:", "") if to_number else ""
+        # Keep full WhatsApp format for consistency (whatsapp:+1234567890)
+        # This ensures database lookups and message sending use the same format
+        logger.info(f"Raw Twilio numbers - From: {from_number}, To: {to_number}")
         
         logger.info(f"Message from {from_number}: {message_body}")
         
@@ -188,11 +188,12 @@ async def handle_activation_message(
             )
             return
         
-        # Activate subscription
+        # Activate subscription - ensure wa_id is stored in full WhatsApp format
+        wa_id_full = wa_id if wa_id.startswith("whatsapp:") else f"whatsapp:{wa_id}"
         await supabase_service.update_subscription(
             subscription["id"],
             {
-                "wa_id": wa_id,
+                "wa_id": wa_id_full,
                 "status": "active",
                 "activated_at": "now()"
             }

@@ -81,30 +81,33 @@ def create_dedupe_key(user_id: str, message_content: str) -> str:
     return f"onb:{user_id}:{message_hash}"
 
 async def send_message_once(whatsapp_service, wa_id: str, message: str, dedupe_key: str = None) -> bool:
-    """Send message with Redis-based idempotency guard"""
+    """Send message with Redis-based idempotency guard (TEMPORARILY DISABLED)"""
     redis = get_redis_client()
     
-    # If Redis unavailable, send without deduplication
-    if not redis or not dedupe_key:
-        return await whatsapp_service.send_message(wa_id, message)
+    # TEMPORARILY DISABLE DEDUPLICATION FOR DEBUGGING
+    log_info("redis_deduplication_disabled_for_debugging", 
+             wa_id=wa_id, 
+             dedupe_key=dedupe_key)
+    return await whatsapp_service.send_message(wa_id, message)
     
-    # Check if already sent
-    if redis.exists(dedupe_key):
-        log_warning("duplicate_message_suppressed", 
-                   wa_id=wa_id, 
-                   dedupe_key=dedupe_key)
-        return True  # Return success since message was already sent
-    
-    # Send message
-    success = await whatsapp_service.send_message(wa_id, message)
-    
-    # Mark as sent if successful (30 seconds TTL for testing)
-    if success:
-        redis.setex(dedupe_key, 30, "sent")
-        log_info("message_dedupe_cached", 
-                dedupe_key=dedupe_key)
-    
-    return success
+    # Original Redis logic (commented out for debugging)
+    # if not redis or not dedupe_key:
+    #     return await whatsapp_service.send_message(wa_id, message)
+    # 
+    # if redis.exists(dedupe_key):
+    #     log_warning("duplicate_message_suppressed", 
+    #                wa_id=wa_id, 
+    #                dedupe_key=dedupe_key)
+    #     return True
+    # 
+    # success = await whatsapp_service.send_message(wa_id, message)
+    # 
+    # if success:
+    #     redis.setex(dedupe_key, 30, "sent")
+    #     log_info("message_dedupe_cached", 
+    #             dedupe_key=dedupe_key)
+    # 
+    # return success
 
 # Shadow-write helper for gradual migration to unified dispatcher
 async def shadow_write_to_dispatcher(supabase_service, user_id: str, message_type: str, content: str, delay_seconds: int = 0):

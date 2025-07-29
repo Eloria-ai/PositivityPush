@@ -32,9 +32,11 @@ class WhatsAppService:
         """Send text message via Twilio WhatsApp"""
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
-                # Twilio WhatsApp format: whatsapp:+1234567890
-                formatted_to = f"whatsapp:{to}" if not to.startswith("whatsapp:") else to
+                # Ensure consistent WhatsApp format - should already be whatsapp:+1234567890
+                formatted_to = to if to.startswith("whatsapp:") else f"whatsapp:{to}"
                 formatted_from = f"whatsapp:{settings.TWILIO_WHATSAPP_NUMBER}"
+                
+                logger.info(f"Sending WhatsApp message - To: {formatted_to}, From: {formatted_from}")
                 
                 # Twilio uses form data
                 payload = {
