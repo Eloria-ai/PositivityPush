@@ -571,20 +571,27 @@ EXAMPLES - COMPLETE TIMES (EXTRACT DIRECTLY):
 - User: "around 11pm" + AI asking about bedtime → {{"evening_gratitude": "11:00 PM"}}
 
 EXAMPLES - AMBIGUOUS TIMES (NEED CLARIFICATION):
+- User: "At 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+- User: "at 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
 - User: "Around 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
 - User: "Mmm something around 7 ?" + AI asking about check-ins → {{"CLARIFY_AMPM": {{"hour": "7", "context": "accountability_checkin"}}}}
 - User: "around 9" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "9", "context": "day_planning"}}}}
 - User: "maybe 8?" + AI asking about bedtime → {{"CLARIFY_AMPM": {{"hour": "8", "context": "evening_gratitude"}}}}
 - User: "8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+- User: "I think 7" + AI asking about check-ins → {{"CLARIFY_AMPM": {{"hour": "7", "context": "accountability_checkin"}}}}
 
 AMBIGUOUS TIME HANDLING:
-- ANY TIME WITHOUT AM/PM NEEDS CLARIFICATION: "Around 8", "8", "maybe 7", "something around 9"
+- ANY TIME WITHOUT AM/PM NEEDS CLARIFICATION: "At 8", "at 8", "Around 8", "8", "maybe 7", "something around 9", "I think 7"
 - Extract the number and return: {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
 - Look at the AI's question to determine context (planning=day_planning, check-in=accountability_checkin, bedtime=evening_gratitude)
 - This triggers an AM/PM clarification question
 - NEVER extract ambiguous times as complete preferences - they MUST be clarified first
 
-MANDATORY: If you see "Around 8" and AI is asking about planning, you MUST return {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+MANDATORY PATTERNS TO DETECT:
+- "At 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+- "at 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+- "Around 8" + AI asking about planning → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+- ANY number without AM/PM when AI is asking about time → NEEDS CLARIFICATION
 
 AM/PM CLARIFICATION RESPONSES:
 - If AI previously asked "7 AM or 7 PM?" and user responds with "AM", "am", "7am", "7 AM", etc., extract as:
@@ -617,7 +624,8 @@ Return ONLY valid JSON with extracted information, or empty {{}} if nothing foun
             logger.info("Time extraction attempt",
                        user_message=user_message,
                        ai_response=ai_response[:100] + "..." if len(ai_response) > 100 else ai_response,
-                       raw_extraction_result=result)
+                       raw_extraction_result=result,
+                       full_prompt=prompt[:300] + "..." if len(prompt) > 300 else prompt)
             
             try:
                 extracted = json.loads(result)
@@ -625,16 +633,72 @@ Return ONLY valid JSON with extracted information, or empty {{}} if nothing foun
                     logger.info("Successfully extracted schedule info", extracted=extracted)
                     return extracted
                 else:
-                    logger.info("Extraction returned empty result", result=result)
+                    logger.info("Extraction returned empty result, trying fallback", result=result)
+                    # Try fallback extraction for simple patterns
+                    fallback = await self.fallback_time_extraction(user_message, ai_response)
+                    if fallback:
+                        logger.info("Fallback extraction succeeded", fallback=fallback)
+                        return fallback
                     return {}
             except json.JSONDecodeError as e:
-                logger.error("Failed to parse extraction JSON",
+                logger.error("Failed to parse extraction JSON, trying fallback",
                            raw_result=result,
                            json_error=str(e))
+                # Try fallback extraction
+                fallback = await self.fallback_time_extraction(user_message, ai_response)
+                if fallback:
+                    logger.info("Fallback extraction succeeded after JSON error", fallback=fallback)
+                    return fallback
                 return {}
                 
         except Exception as e:
             logger.error(f"Error extracting schedule from conversation: {e}")
+            return {}
+    
+    async def fallback_time_extraction(self, user_message: str, ai_response: str) -> Dict[str, Any]:
+        """Fallback extraction for when main AI extraction fails"""
+        try:
+            # Simple, focused prompt for time extraction
+            prompt = f"""
+USER MESSAGE: "{user_message}"
+AI RESPONSE: "{ai_response}"
+
+TASK: Extract any time mentioned by the user that needs AM/PM clarification.
+
+DETECT THESE PATTERNS:
+- "At 8", "at 8" → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+- "Around 7", "around 7" → {{"CLARIFY_AMPM": {{"hour": "7", "context": "day_planning"}}}}  
+- Just "8", "9", "10" → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+
+If AI is asking about "planning", use "day_planning" context.
+If AI is asking about "check-in", use "accountability_checkin" context.
+
+Return ONLY JSON or empty {{}} if no time found.
+"""
+
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a time extraction expert. Return only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=100,
+                temperature=0.1
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            try:
+                fallback_extracted = json.loads(result)
+                if isinstance(fallback_extracted, dict) and fallback_extracted:
+                    return fallback_extracted
+            except json.JSONDecodeError:
+                pass
+                
+            return {}
+            
+        except Exception as e:
+            logger.error(f"Error in fallback extraction: {e}")
             return {}
     
     async def save_extracted_information(self, user_id: str, extracted_info: Dict[str, Any], preferences: Dict[str, Any]) -> None:
