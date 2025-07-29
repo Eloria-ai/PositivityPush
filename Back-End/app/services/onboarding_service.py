@@ -200,31 +200,77 @@ class OnboardingService:
             logger.error(f"Error checking onboarding status: {e}")
             return False
     
+    async def extract_ampm_with_ai(self, user_message: str, hour: str) -> Optional[str]:
+        """Use AI to understand AM/PM responses naturally"""
+        try:
+            prompt = f"""
+The user was asked: "Did you mean {hour} AM or {hour} PM?"
+
+User responded: "{user_message}"
+
+TASK: Determine if the user is indicating AM or PM.
+
+NATURAL RESPONSES TO UNDERSTAND:
+- "AM", "am", "a.m.", "A.M." → "AM"
+- "PM", "pm", "p.m.", "P.M." → "PM"  
+- "morning", "in the morning", "morning time" → "AM"
+- "evening", "night", "nighttime", "afternoon" → "PM"
+- "{hour}am", "{hour} am", "{hour}AM", "{hour} AM" → "AM"
+- "{hour}pm", "{hour} pm", "{hour}PM", "{hour} PM" → "PM"
+- "in the morning", "early", "before work" → "AM"
+- "after work", "evening time", "at night" → "PM"
+
+EXAMPLES:
+- User: "AM" → "AM"
+- User: "pm" → "PM"
+- User: "morning" → "AM"
+- User: "evening" → "PM"
+- User: "{hour}pm" → "PM"
+- User: "in the morning" → "AM"
+- User: "not sure" → "UNCLEAR"
+- User: "hello" → "UNCLEAR"
+
+Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
+"""
+
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert at understanding natural language time preferences. Return only AM, PM, or UNCLEAR."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10,
+                temperature=0.1
+            )
+            
+            result = response.choices[0].message.content.strip().upper()
+            
+            if result in ["AM", "PM"]:
+                logger.info(f"AI understood AM/PM: '{user_message}' → {result}")
+                return result
+            else:
+                logger.info(f"AI could not determine AM/PM from: '{user_message}' → {result}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in AI AM/PM extraction: {e}")
+            return None
+    
     async def handle_ampm_clarification(self, user_message: str, pending_clarification: Dict[str, Any], user_id: str, preferences: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Handle AM/PM clarification responses from users"""
+        """Handle AM/PM clarification responses from users using AI understanding"""
         try:
             hour = pending_clarification.get("hour")
             context = pending_clarification.get("context", "day_planning")
             
-            # Check if user is responding with AM/PM
-            message_lower = user_message.lower().strip()
+            # Use AI to understand AM/PM responses naturally
+            period = await self.extract_ampm_with_ai(user_message, hour)
             
-            # Pattern matching for AM/PM responses
-            if re.search(r'\b(am|a\.m\.?)\b', message_lower):
-                # User said AM
-                time_value = f"{hour}:00 AM"
-                period = "AM"
-            elif re.search(r'\b(pm|p\.m\.?)\b', message_lower):
-                # User said PM  
-                time_value = f"{hour}:00 PM"
-                period = "PM"
-            elif message_lower in ["am", "pm"]:
-                # Just "AM" or "PM"
-                period = message_lower.upper()
-                time_value = f"{hour}:00 {period}"
-            else:
+            if not period:
                 # Not an AM/PM response, continue normal processing
                 return None
+            
+            # Create the time value
+            time_value = f"{hour}:00 {period}"
             
             # Clear the pending clarification
             await self.supabase.set_preference_value(user_id, "pending_clarification", None)
