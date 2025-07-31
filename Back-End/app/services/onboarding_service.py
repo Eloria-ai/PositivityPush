@@ -565,7 +565,7 @@ Examples:
 - "At 8" (no AM/PM) → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
 - "7pm" (has AM/PM) → {{"day_planning": "7:00 PM"}}
 
-Context: If AI asks about "planning" use "day_planning", if "check-in" use "accountability_checkin"
+Context: If AI asks about "planning" use "day_planning", if "check-in" use "accountability_checkin", if "gratitude" or "evening" use "evening_gratitude"
 
 Return JSON or {{}}:
 """
@@ -634,11 +634,12 @@ TASK: Extract any time mentioned by the user that needs AM/PM clarification.
 
 DETECT THESE PATTERNS:
 - "At 8", "at 8" → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- "Around 7", "around 7" → {{"CLARIFY_AMPM": {{"hour": "7", "context": "day_planning"}}}}  
-- Just "8", "9", "10" → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
+- "Around 7", "around 7" → {{"CLARIFY_AMPM": {{"hour": "7", "context": "accountability_checkin"}}}}  
+- "should we say 11" → {{"CLARIFY_AMPM": {{"hour": "11", "context": "evening_gratitude"}}}}
 
 If AI is asking about "planning", use "day_planning" context.
 If AI is asking about "check-in", use "accountability_checkin" context.
+If AI is asking about "gratitude" or "evening", use "evening_gratitude" context.
 
 Return ONLY JSON or empty {{}} if no time found.
 """
