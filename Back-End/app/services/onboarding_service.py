@@ -602,6 +602,21 @@ Generate a natural acknowledgment + the specific question (max 40 words):
             
             current_context = missing_items[0] if missing_items else "day_planning"
             
+            # Special handling for weekly_reflection - needs day+time parsing
+            if current_context == "weekly_reflection":
+                day, time = await self.parse_weekly_time(user_message)
+                if day and time:
+                    return {"weekly_reflection": {"day": day, "time": time}}
+                # If no day+time found, fall through to regular time extraction
+            
+            # Special handling for timezone
+            if current_context == "current_timezone":
+                timezone_detected = self.timezone_service.extract_timezone(user_message)
+                if timezone_detected:
+                    return {"current_timezone": timezone_detected}
+                return {}
+            
+            # Regular time extraction for other contexts
             prompt = f"""
 User said: "{user_message}"
 
@@ -950,7 +965,13 @@ Return ONLY JSON or empty {{}} if no time found.
             next_question = await self.get_next_question(preferences)
             
             # Generate natural acknowledgment with AI
-            formatted_time = self.format_time_ampm(value) if isinstance(value, str) else value
+            if key == 'weekly_reflection' and isinstance(value, dict):
+                # Format weekly reflection as "Sunday at 11:00 AM"
+                day = value.get('day', '').title()
+                time = value.get('time', '')
+                formatted_time = f"{day} at {time}"
+            else:
+                formatted_time = self.format_time_ampm(value) if isinstance(value, str) else value
             acknowledgment = await self.generate_natural_acknowledgment(key, formatted_time, next_question)
             
             message = acknowledgment

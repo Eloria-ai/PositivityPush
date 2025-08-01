@@ -283,10 +283,22 @@ async def handle_coaching_message_with_subscription(
                     'timezone_updated_at': datetime.utcnow().isoformat()
                 }
             )
-            await whatsapp_service.send_message(
-                wa_id,
-                f"🌍 Got it! I've switched you to {detected_timezone}. Your schedule is now in sync with your current location!"
-            )
+            # Check if user is in onboarding to show appropriate message
+            preferences = await supabase_service.get_user_preferences(subscription["id"])
+            is_onboarding = not preferences.get("onboarding_completed", True)
+            
+            if is_onboarding:
+                # During onboarding - timezone is being set for first time
+                await whatsapp_service.send_message(
+                    wa_id,
+                    f"🌍 Perfect! I've set your timezone to {detected_timezone}. Your personalized messages will be perfectly timed for you!"
+                )
+            else:
+                # After onboarding - timezone is being changed/updated
+                await whatsapp_service.send_message(
+                    wa_id,
+                    f"🌍 Got it! I've switched you to {detected_timezone}. Your schedule is now in sync with your current location!"
+                )
             return
         
         # Check for timezone update command - privacy-first approach
