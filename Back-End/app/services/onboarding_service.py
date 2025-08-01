@@ -529,6 +529,24 @@ RECENT CONVERSATION:
     async def generate_natural_ai_response(self, user_message: str, context: str, completion_status: Dict[str, Any]) -> Dict[str, Any]:
         """Generate completely natural AI response like ChatGPT"""
         try:
+            # Get the specific next question to ensure proper sequence
+            # Extract current preferences from completion_status
+            collected = completion_status.get('collected', {})
+            missing = completion_status.get('missing', [])
+            
+            # Determine the next specific question
+            next_item = missing[0] if missing else None
+            specific_question = ""
+            
+            if next_item == 'accountability_checkin':
+                specific_question = "What time should I check in on your daily progress?"
+            elif next_item == 'evening_gratitude':
+                specific_question = "What time do you usually go to bed?"
+            elif next_item == 'weekly_reflection':
+                specific_question = "Which day and time would you like your weekly reflection?"
+            elif next_item == 'current_timezone':
+                specific_question = "What's your location or timezone so I can send messages at the right time?"
+            
             prompt = f"""
 {context}
 
@@ -538,31 +556,24 @@ TASK: Respond naturally as Maya, the AI life coach. Your response should:
 
 1. ACKNOWLEDGE what they said naturally (show you're listening)
 2. If they mentioned any schedule preferences, acknowledge them warmly  
-3. Focus on learning their daily routine and preferred message times
-4. Ask about when they like to receive support/motivation during their day
-5. Ask ONE timing question at a time, not multiple things
+3. Then ask the SPECIFIC next question in the sequence
 
 PROGRESS: {completion_status['progress']} schedule preferences collected
 
-ONBOARDING PRIORITY:
-1. Start by asking about their daily routine/schedule
-2. Learn when they prefer to receive motivational messages
-3. Gradually collect all 5 timing preferences one at a time
-4. Don't ask about life goals - focus on daily timing
+NEXT SPECIFIC QUESTION TO ASK: "{specific_question}"
+
+IMPORTANT: You MUST ask the specific question above. Don't create your own question.
 
 STYLE GUIDELINES:
 - Sound like a real person having a conversation
 - Keep under 40 words
-- Ask ONE timing question at a time
-- Focus on daily routine, not life goals
-- Be warm but stay on topic (scheduling)
+- Acknowledge their response, then ask the specific question
+- Be warm and natural
 
-EXAMPLES OF GOOD QUESTIONS:
-- "When do you usually like to start planning your day?"
-- "What time works best for a daily check-in?"
-- "When do you prefer evening wind-down messages?"
+EXAMPLE FORMAT:
+"Got it, [acknowledge their response]! [ask the specific question above]"
 
-Generate a natural, brief response (max 40 words):
+Generate a natural acknowledgment + the specific question (max 40 words):
 """
             
             response = self.openai_client.chat.completions.create(
