@@ -323,7 +323,29 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
             # Get conversation history for natural context
             conversation_context = await self.build_natural_conversation_context(user_id, preferences)
             
-            # Check if onboarding is complete
+            # Check if we're waiting for AM/PM clarification FIRST
+            pending_clarification = preferences.get("pending_clarification")
+            if pending_clarification and isinstance(pending_clarification, dict):
+                # Check if user is responding with AM/PM
+                clarification_response = await self.handle_ampm_clarification(
+                    user_message, pending_clarification, user_id, preferences
+                )
+                if clarification_response:
+                    return clarification_response
+            
+            # Extract any schedule information FIRST (before generating AI response)
+            extracted_info = await self.extract_schedule_from_conversation(
+                user_message, 
+                "",  # Don't use AI response for extraction - just user message
+                preferences
+            )
+            
+            # Save any extracted information IMMEDIATELY
+            if extracted_info:
+                await self.save_extracted_information(user_id, extracted_info, preferences)
+                logger.info(f"Extracted and saved: {extracted_info}")
+            
+            # NOW check completion status with UPDATED preferences
             completion_status = await self.check_completion_status(preferences)
             
             if completion_status["is_complete"]:
@@ -338,28 +360,11 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
                     "message": self.get_completion_message()
                 }
             
-            # Generate natural AI response and extract information
+            # Generate natural AI response based on UPDATED completion status
             ai_response = await self.generate_natural_ai_response(
                 user_message, 
                 conversation_context, 
                 completion_status
-            )
-            
-            # Check if we're waiting for AM/PM clarification
-            pending_clarification = preferences.get("pending_clarification")
-            if pending_clarification and isinstance(pending_clarification, dict):
-                # Check if user is responding with AM/PM
-                clarification_response = await self.handle_ampm_clarification(
-                    user_message, pending_clarification, user_id, preferences
-                )
-                if clarification_response:
-                    return clarification_response
-            
-            # Extract any schedule information from the conversation
-            extracted_info = await self.extract_schedule_from_conversation(
-                user_message, 
-                ai_response.get("response", ""),
-                preferences
             )
             
             # Debug logging to understand what's happening
@@ -424,15 +429,6 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
                     "completed": False,
                     "message": clarification_message
                 }
-            
-            # Save any extracted information
-            if extracted_info:
-                await self.save_extracted_information(user_id, extracted_info, preferences)
-                logger.info(f"Extracted and saved: {extracted_info}")
-            else:
-                logger.warning("No information extracted from user message",
-                              user_message=user_message,
-                              ai_response_snippet=ai_response.get("response", "")[:100])
             
             return {
                 "completed": False,
