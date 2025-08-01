@@ -597,19 +597,27 @@ Generate a natural acknowledgment + the specific question (max 40 words):
         """Extract schedule information from natural conversation"""
         try:
             # Simplified, direct prompt
+            # Determine context based on what's missing (not AI response)
+            missing_items = []
+            schedule_items = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection', 'current_timezone']
+            for item in schedule_items:
+                if not preferences.get(item):
+                    missing_items.append(item)
+            
+            current_context = missing_items[0] if missing_items else "day_planning"
+            
             prompt = f"""
 User said: "{user_message}"
-AI response: "{ai_response}"
 
 Extract time information. Rules:
 1. If user mentions time WITH AM/PM → extract it directly
 2. If user mentions time WITHOUT AM/PM → needs clarification
 
 Examples:
-- "At 8" (no AM/PM) → {{"CLARIFY_AMPM": {{"hour": "8", "context": "day_planning"}}}}
-- "7pm" (has AM/PM) → {{"day_planning": "7:00 PM"}}
+- "At 8" (no AM/PM) → {{"CLARIFY_AMPM": {{"hour": "8", "context": "{current_context}"}}}}
+- "7pm" (has AM/PM) → {{"{current_context}": "7:00 PM"}}
 
-Context: If AI asks about "planning" use "day_planning", if "check-in" use "accountability_checkin", if "gratitude" or "evening" use "evening_gratitude"
+Current context: {current_context}
 
 Return JSON or {{}}:
 """
