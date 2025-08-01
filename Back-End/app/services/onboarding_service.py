@@ -375,6 +375,39 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
                 hour = clarify_info["hour"]
                 context = clarify_info["context"]
                 
+                # Smart PM defaulting for evening gratitude
+                # If the context is evening gratitude and the hour is 6-12, assume PM
+                # to avoid unnecessary clarification when AI mentions bedtime/sleep
+                try:
+                    hour_int = int(hour)
+                except ValueError:
+                    hour_int = None
+
+                if context == "evening_gratitude" and hour_int and 6 <= hour_int <= 12:
+                    time_value = f"{hour}:00 PM"
+                    await self.supabase.set_preference_value(user_id, context, time_value)
+                    preferences[context] = time_value
+
+                    logger.info("Auto-defaulted evening_gratitude to PM",
+                                hour=hour, time_value=time_value, context=context)
+
+                    # Check if onboarding is now complete
+                    completion_status = await self.check_completion_status(preferences)
+                    if completion_status["is_complete"]:
+                        await self.supabase.mark_onboarding_completed(user_id)
+                        await self.supabase.set_preference_value(user_id, "onboarding_step", None)
+                        return {
+                            "completed": True,
+                            "message": f"Perfect! I'll send you evening gratitude reminders at {time_value}.\n\n{self.get_completion_message()}"
+                        }
+
+                    next_question = await self.get_next_question(preferences)
+                    return {
+                        "completed": False,
+                        "message": f"Perfect! I'll send you evening gratitude reminders at {time_value}. {next_question}"
+                    }
+                
+                # For other contexts or hours outside 6-12, proceed with normal clarification
                 # Store the pending clarification state
                 await self.supabase.set_preference_value(user_id, "pending_clarification", {
                     "hour": hour,
