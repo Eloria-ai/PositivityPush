@@ -659,6 +659,26 @@ Return ONLY JSON or empty {{}} if no time found.
             try:
                 fallback_extracted = json.loads(result)
                 if isinstance(fallback_extracted, dict) and fallback_extracted:
+                    # --- Context correction logic ---------------------------------
+                    # The OpenAI fallback prompt often defaults ambiguous times to
+                    # the "day_planning" context. That can be wrong when the AI's
+                    # previous message was asking about progress check-ins or
+                    # evening gratitude. We inspect the AI response and, if the
+                    # context is still "day_planning", override it when more
+                    # appropriate keywords are detected.
+                    if "CLARIFY_AMPM" in fallback_extracted:
+                        clar = fallback_extracted["CLARIFY_AMPM"]
+                        if isinstance(clar, dict):
+                            current_ctx = clar.get("context", "day_planning")
+                            if current_ctx == "day_planning":
+                                ai_lower = ai_response.lower()
+                                if ("check-in" in ai_lower) or ("progress" in ai_lower):
+                                    clar["context"] = "accountability_checkin"
+                                elif any(word in ai_lower for word in [
+                                    "gratitude", "grateful", "bedtime", "sleep", "evening"
+                                ]):
+                                    clar["context"] = "evening_gratitude"
+                    # ----------------------------------------------------------------
                     return fallback_extracted
             except json.JSONDecodeError:
                 pass
