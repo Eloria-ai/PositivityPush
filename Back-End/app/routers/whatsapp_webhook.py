@@ -293,6 +293,23 @@ async def handle_coaching_message_with_subscription(
                     wa_id,
                     f"🌍 Perfect! I've set your timezone to {detected_timezone}. Your personalized messages will be perfectly timed for you!"
                 )
+                
+                # Check if onboarding is now complete after timezone update
+                onboarding_service = OnboardingService(supabase_service)
+                
+                # Get updated preferences (including the new timezone)
+                updated_preferences = await supabase_service.get_user_preferences(subscription["id"])
+                completion_status = await onboarding_service.check_completion_status(updated_preferences)
+                
+                if completion_status["is_complete"]:
+                    # Onboarding is complete! Send completion message
+                    await supabase_service.set_preference_value(subscription["id"], "onboarding_completed", True)
+                    await supabase_service.set_preference_value(subscription["id"], "onboarding_step", None)
+                    
+                    completion_message = onboarding_service.get_completion_message()
+                    await whatsapp_service.send_message(wa_id, completion_message)
+                    
+                    logger.info(f"✅ Onboarding completed after timezone detection for user {subscription['id']}")
             else:
                 # After onboarding - timezone is being changed/updated
                 await whatsapp_service.send_message(
