@@ -334,8 +334,22 @@ def send_onboarding_response(self, user_id: str, wa_id: str, response_message: s
                    dedupe_key=dedupe_key,
                    retry_count=self.request.retries)
         
-        # Initialize WhatsApp service
+        # Initialize services
         whatsapp_service = WhatsAppService()
+        db = get_supabase_client()
+        supabase_service = SupabaseService(db)
+        
+        # Check if onboarding is still active before sending message
+        preferences = asyncio.run(supabase_service.get_user_preferences(user_id))
+        onboarding_completed = preferences.get("onboarding_completed", True)
+        
+        if onboarding_completed == True or onboarding_completed is None:
+            log_info("onboarding_task_skipped_completed",
+                       user_id=user_id,
+                       wa_id=wa_id,
+                       correlation_id=correlation_id,
+                       message=response_message[:50] + "..." if len(response_message) > 50 else response_message)
+            return {"status": "skipped", "reason": "onboarding_completed", "user_id": user_id, "wa_id": wa_id}
         
         # Send response message with idempotency guard
         success = asyncio.run(send_message_once(whatsapp_service, wa_id, response_message, dedupe_key))
