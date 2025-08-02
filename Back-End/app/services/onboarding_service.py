@@ -313,6 +313,56 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
         }
         return descriptions.get(context, "messages")
     
+    async def handle_weekly_ampm_clarification(self, user_message: str, pending_weekly_clarification: Dict[str, Any], user_id: str, preferences: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Handle weekly reflection AM/PM clarification responses from users"""
+        try:
+            day = pending_weekly_clarification.get("day")
+            hour = pending_weekly_clarification.get("hour")
+            
+            # Use AI to understand AM/PM responses naturally
+            period = await self.extract_ampm_with_ai(user_message, hour)
+            
+            if not period:
+                # Not an AM/PM response, continue normal processing
+                return None
+            
+            # Create the weekly reflection value
+            time_value = f"{hour}:00 {period}"
+            weekly_reflection_value = {"day": day, "time": time_value}
+            
+            # Clear the pending weekly clarification
+            await self.supabase.set_preference_value(user_id, "pending_weekly_clarification", None)
+            
+            # Save the weekly reflection schedule
+            await self.supabase.set_preference_value(user_id, "weekly_reflection", weekly_reflection_value)
+            preferences["weekly_reflection"] = weekly_reflection_value
+            
+            logger.info(f"Resolved weekly AM/PM clarification: {day} {hour} {period} -> {weekly_reflection_value}")
+            
+            # Generate acknowledgment and next question
+            day_title = day.title()
+            acknowledgment = f"Perfect! I'll send you weekly reflections on {day_title} at {time_value}."
+            
+            # Check completion and get next question
+            completion_status = await self.check_completion_status(preferences)
+            if completion_status["is_complete"]:
+                await self.supabase.mark_onboarding_completed(user_id)
+                await self.supabase.set_preference_value(user_id, "onboarding_step", None)
+                return {
+                    "completed": True,
+                    "message": f"{acknowledgment}\n\n{self.get_completion_message()}"
+                }
+            
+            next_question = await self.get_next_question(preferences)
+            return {
+                "completed": False,
+                "message": f"{acknowledgment} {next_question}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error handling weekly AM/PM clarification: {e}")
+            return None
+    
     # ==================== CONVERSATIONAL AI ONBOARDING ====================
     
     async def generate_conversational_response(self, user_id: str, user_message: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
@@ -332,6 +382,16 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
                 )
                 if clarification_response:
                     return clarification_response
+            
+            # Check if we're waiting for weekly AM/PM clarification
+            pending_weekly_clarification = preferences.get("pending_weekly_clarification")
+            if pending_weekly_clarification and isinstance(pending_weekly_clarification, dict):
+                # Check if user is responding with AM/PM for weekly reflection
+                weekly_clarification_response = await self.handle_weekly_ampm_clarification(
+                    user_message, pending_weekly_clarification, user_id, preferences
+                )
+                if weekly_clarification_response:
+                    return weekly_clarification_response
             
             # Extract any schedule information FIRST (before generating AI response)
             extracted_info = await self.extract_schedule_from_conversation(
@@ -424,6 +484,30 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
                 clarification_message = f"Thanks for sharing '{hour}'! Just to be sure - did you mean {hour} AM or {hour} PM?"
                 
                 logger.info(f"Generated AM/PM clarification for hour {hour} in context {context}")
+                
+                return {
+                    "completed": False,
+                    "message": clarification_message
+                }
+            
+            # Check if we need weekly reflection AM/PM clarification
+            if extracted_info and "CLARIFY_WEEKLY_AMPM" in extracted_info:
+                clarify_info = extracted_info["CLARIFY_WEEKLY_AMPM"]
+                day = clarify_info["day"]
+                hour = clarify_info["hour"]
+                
+                # Store the pending weekly clarification state
+                await self.supabase.set_preference_value(user_id, "pending_weekly_clarification", {
+                    "day": day,
+                    "hour": hour,
+                    "timestamp": time.time()
+                })
+                
+                # Generate weekly AM/PM clarification question
+                day_title = day.title()
+                clarification_message = f"Thanks! Just to be clear - did you mean {day_title} {hour} AM or {day_title} {hour} PM?"
+                
+                logger.info(f"Generated weekly AM/PM clarification for {day} {hour}")
                 
                 return {
                     "completed": False,
@@ -604,10 +688,16 @@ Generate a natural acknowledgment + the specific question (max 40 words):
             
             # Special handling for weekly_reflection - needs day+time parsing
             if current_context == "weekly_reflection":
+                # First check if we need AM/PM clarification for weekly reflection
+                weekly_clarification = await self.check_weekly_ampm_clarification(user_message)
+                if weekly_clarification:
+                    return weekly_clarification
+                
                 day, time = await self.parse_weekly_time(user_message)
                 if day and time:
                     return {"weekly_reflection": {"day": day, "time": time}}
-                # If no day+time found, fall through to regular time extraction
+                # If no day+time found, return empty (don't fall through to regular time extraction)
+                return {}
             
             # Special handling for timezone
             if current_context == "current_timezone":
@@ -1732,15 +1822,16 @@ Return ONLY JSON or empty {{}} if no time found.
             User input: "{message}"
             
             PARSING EXAMPLES:
-            - "Sunday at 10" -> {{"day": "sunday", "time": "10:00 AM"}}
-            - "Sunday 11" -> {{"day": "sunday", "time": "11:00 AM"}}  
+            - "Sunday at 10 am" -> {{"day": "sunday", "time": "10:00 AM"}}
             - "Sunday 11 am" -> {{"day": "sunday", "time": "11:00 AM"}}
+            - "Sunday 11 pm" -> {{"day": "sunday", "time": "11:00 PM"}}
             - "Monday 9pm" -> {{"day": "monday", "time": "09:00 PM"}}
-            - "Friday evening 7" -> {{"day": "friday", "time": "07:00 PM"}}
+            - "Friday evening 7pm" -> {{"day": "friday", "time": "07:00 PM"}}
             
             RULES:
             - Use standard 12-hour format with AM/PM
-            - If no AM/PM specified, assume AM for times 1-11, assume PM for evening context
+            - ONLY extract if BOTH day AND time with AM/PM are clearly specified
+            - If no AM/PM specified, return null (will trigger clarification)
             - Handle natural language flexibly
             - If user just says "AM" or "PM" alone, return null (incomplete)
             
@@ -1790,6 +1881,63 @@ Return ONLY JSON or empty {{}} if no time found.
         except Exception as e:
             logger.error(f"Error parsing weekly time with OpenAI: {e}")
             return None, None
+    
+    async def check_weekly_ampm_clarification(self, message: str) -> Optional[Dict[str, Any]]:
+        """Check if weekly reflection input needs AM/PM clarification (e.g., 'Sunday 11')"""
+        try:
+            prompt = f"""
+            Analyze user input for weekly reflection to detect if AM/PM clarification is needed.
+            
+            User input: "{message}"
+            
+            DETECTION RULES:
+            - If user mentions DAY + HOUR without AM/PM → needs clarification
+            - If user mentions DAY + HOUR with AM/PM → no clarification needed
+            - If incomplete input (just day, just hour, etc.) → no clarification needed
+            
+            EXAMPLES THAT NEED CLARIFICATION:
+            - "Sunday 11" → {{"CLARIFY_WEEKLY_AMPM": {{"day": "sunday", "hour": "11"}}}}
+            - "Monday 7" → {{"CLARIFY_WEEKLY_AMPM": {{"day": "monday", "hour": "7"}}}}
+            - "Friday at 9" → {{"CLARIFY_WEEKLY_AMPM": {{"day": "friday", "hour": "9"}}}}
+            
+            EXAMPLES THAT DON'T NEED CLARIFICATION:
+            - "Sunday 11 am" → {{}}
+            - "Monday 7pm" → {{}}
+            - "Sunday" (incomplete) → {{}}
+            - "11" (no day) → {{}}
+            - "Sunday evening" → {{}}
+            
+            Return JSON: {{"CLARIFY_WEEKLY_AMPM": {{"day": "dayname", "hour": "number"}}}} or {{}}
+            Return ONLY the JSON object.
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a time parsing expert. Return only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=100,
+                temperature=0.1
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            try:
+                extracted = json.loads(result)
+                if isinstance(extracted, dict) and "CLARIFY_WEEKLY_AMPM" in extracted:
+                    clarify_info = extracted["CLARIFY_WEEKLY_AMPM"]
+                    if isinstance(clarify_info, dict) and "day" in clarify_info and "hour" in clarify_info:
+                        return {"CLARIFY_WEEKLY_AMPM": clarify_info}
+                return None
+                
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse weekly AM/PM clarification JSON: {result}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error checking weekly AM/PM clarification: {e}")
+            return None
     
     # Note: parse_timezone method removed - now using TimezoneService.extract_timezone() 
     # which properly handles IANA timezone zones (e.g., 'America/New_York' instead of 'EST')
