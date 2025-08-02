@@ -623,7 +623,13 @@ RECENT CONVERSATION:
             elif next_item == 'evening_gratitude':
                 specific_question = "What time do you usually go to bed?"
             elif next_item == 'weekly_reflection':
-                specific_question = "Which day and time would you like your weekly reflection?"
+                # Check if we already have a partial day stored
+                partial_day = collected.get('weekly_reflection_partial_day')
+                if partial_day:
+                    day_title = partial_day.title()
+                    specific_question = f"What time on {day_title} works best for your weekly reflection?"
+                else:
+                    specific_question = "Which day and time would you like your weekly reflection?"
             elif next_item == 'current_timezone':
                 specific_question = "What's your location or timezone so I can send messages at the right time?"
             
@@ -688,16 +694,44 @@ Generate a natural acknowledgment + the specific question (max 40 words):
             
             # Special handling for weekly_reflection - needs day+time parsing
             if current_context == "weekly_reflection":
-                # First check if we need AM/PM clarification for weekly reflection
-                weekly_clarification = await self.check_weekly_ampm_clarification(user_message)
-                if weekly_clarification:
-                    return weekly_clarification
+                # Check if we already have a partial day from previous input
+                existing_partial_day = preferences.get("weekly_reflection_partial_day")
                 
-                day, time = await self.parse_weekly_time(user_message)
-                if day and time:
-                    return {"weekly_reflection": {"day": day, "time": time}}
-                # If no day+time found, return empty (don't fall through to regular time extraction)
-                return {}
+                if existing_partial_day:
+                    # We have a day, now looking for time
+                    time_only = await self.extract_time_for_partial_weekly(user_message)
+                    if time_only:
+                        # Combine existing day with new time
+                        complete_weekly = {"day": existing_partial_day, "time": time_only}
+                        # Clear the partial day since we now have complete info
+                        await self.supabase.set_preference_value(user_id, "weekly_reflection_partial_day", None)
+                        return {"weekly_reflection": complete_weekly}
+                    else:
+                        # Check if they need AM/PM clarification for the time they provided
+                        time_clarification = await self.check_time_ampm_clarification_for_partial_weekly(user_message, existing_partial_day)
+                        if time_clarification:
+                            return time_clarification
+                        # If no time extracted, return empty to ask again
+                        return {}
+                else:
+                    # No existing partial day, try normal parsing
+                    # First check if we need AM/PM clarification for weekly reflection
+                    weekly_clarification = await self.check_weekly_ampm_clarification(user_message)
+                    if weekly_clarification:
+                        return weekly_clarification
+                    
+                    # Try to parse complete day+time
+                    day, time = await self.parse_weekly_time(user_message)
+                    if day and time:
+                        return {"weekly_reflection": {"day": day, "time": time}}
+                    
+                    # Check if user provided just a day (partial input)
+                    partial_day = await self.extract_partial_weekly_day(user_message)
+                    if partial_day:
+                        return {"weekly_reflection_partial_day": partial_day}
+                    
+                    # If no day or day+time found, return empty (don't fall through to regular time extraction)
+                    return {}
             
             # Special handling for timezone
             if current_context == "current_timezone":
@@ -852,6 +886,11 @@ Return ONLY JSON or empty {{}} if no time found.
                         'timezone_updated_at': datetime.utcnow().isoformat()
                     })
                     preferences['current_timezone'] = value
+                elif key == 'weekly_reflection_partial_day':
+                    # Store partial day and set a flag to ask for time next
+                    await self.supabase.set_preference_value(user_id, "weekly_reflection_partial_day", value)
+                    preferences["weekly_reflection_partial_day"] = value
+                    logger.info(f"Saved partial weekly day: {value}, will ask for time next")
                 else:
                     await self.supabase.set_preference_value(user_id, key, value)
                     preferences[key] = value
@@ -1937,6 +1976,171 @@ Return ONLY JSON or empty {{}} if no time found.
                 
         except Exception as e:
             logger.error(f"Error checking weekly AM/PM clarification: {e}")
+            return None
+    
+    async def extract_partial_weekly_day(self, message: str) -> Optional[str]:
+        """Extract just the day from weekly reflection input (e.g., 'Sunday' -> 'sunday')"""
+        try:
+            prompt = f"""
+            Extract only the day from user input for weekly reflection.
+            
+            User input: "{message}"
+            
+            RULES:
+            - Extract ONLY if user mentions a valid day name alone
+            - Return null if they mention time as well (handled elsewhere)
+            - Return null if no day mentioned
+            
+            EXAMPLES:
+            - "Sunday" → {{"day": "sunday"}}
+            - "Monday" → {{"day": "monday"}}
+            - "I prefer Friday" → {{"day": "friday"}}
+            - "Sunday 11" → {{"day": null}} (has time, handled elsewhere)
+            - "11 am" → {{"day": null}} (no day)
+            - "weekend" → {{"day": null}} (not specific day)
+            
+            Valid days: monday, tuesday, wednesday, thursday, friday, saturday, sunday
+            
+            Return JSON: {{"day": "dayname"}} or {{"day": null}}
+            Return ONLY the JSON object.
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a day extraction expert. Return only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=50,
+                temperature=0.1
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            try:
+                extracted = json.loads(result)
+                if isinstance(extracted, dict):
+                    day = extracted.get("day")
+                    if day and day != "null":
+                        valid_days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+                        if day.lower() in valid_days:
+                            return day.lower()
+                return None
+                
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse partial day JSON: {result}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting partial weekly day: {e}")
+            return None
+    
+    async def extract_time_for_partial_weekly(self, message: str) -> Optional[str]:
+        """Extract time from user input when we already have the day (e.g., '11 am' -> '11:00 AM')"""
+        try:
+            prompt = f"""
+            Extract only the time from user input when day is already known.
+            
+            User input: "{message}"
+            
+            RULES:
+            - Extract ONLY if user mentions time with AM/PM
+            - Return null if no AM/PM specified (will trigger clarification)
+            - Return null if no time mentioned
+            
+            EXAMPLES:
+            - "11 am" → {{"time": "11:00 AM"}}
+            - "7pm" → {{"time": "07:00 PM"}}
+            - "at 9:30 AM" → {{"time": "09:30 AM"}}
+            - "11" → {{"time": null}} (no AM/PM, needs clarification)
+            - "morning" → {{"time": null}} (not specific time)
+            
+            Return JSON: {{"time": "HH:MM AM/PM"}} or {{"time": null}}
+            Return ONLY the JSON object.
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a time extraction expert. Return only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=50,
+                temperature=0.1
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            try:
+                extracted = json.loads(result)
+                if isinstance(extracted, dict):
+                    time_str = extracted.get("time")
+                    if time_str and time_str != "null" and ('AM' in time_str.upper() or 'PM' in time_str.upper()):
+                        return time_str
+                return None
+                
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse time-only JSON: {result}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting time for partial weekly: {e}")
+            return None
+    
+    async def check_time_ampm_clarification_for_partial_weekly(self, message: str, existing_day: str) -> Optional[Dict[str, Any]]:
+        """Check if time input needs AM/PM clarification when we already have the day"""
+        try:
+            prompt = f"""
+            Check if user provided time without AM/PM for weekly reflection.
+            
+            User input: "{message}"
+            Day already known: "{existing_day}"
+            
+            DETECTION RULES:
+            - If user mentions HOUR without AM/PM → needs clarification
+            - If user mentions HOUR with AM/PM → no clarification needed
+            - If no hour mentioned → no clarification needed
+            
+            EXAMPLES THAT NEED CLARIFICATION:
+            - "11" → {{"CLARIFY_WEEKLY_AMPM": {{"day": "{existing_day}", "hour": "11"}}}}
+            - "at 7" → {{"CLARIFY_WEEKLY_AMPM": {{"day": "{existing_day}", "hour": "7"}}}}
+            - "maybe 9" → {{"CLARIFY_WEEKLY_AMPM": {{"day": "{existing_day}", "hour": "9"}}}}
+            
+            EXAMPLES THAT DON'T NEED CLARIFICATION:
+            - "11 am" → {{}}
+            - "7pm" → {{}}
+            - "morning" → {{}} (no specific hour)
+            
+            Return JSON: {{"CLARIFY_WEEKLY_AMPM": {{"day": "{existing_day}", "hour": "number"}}}} or {{}}
+            Return ONLY the JSON object.
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a time parsing expert. Return only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=100,
+                temperature=0.1
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            try:
+                extracted = json.loads(result)
+                if isinstance(extracted, dict) and "CLARIFY_WEEKLY_AMPM" in extracted:
+                    clarify_info = extracted["CLARIFY_WEEKLY_AMPM"]
+                    if isinstance(clarify_info, dict) and "day" in clarify_info and "hour" in clarify_info:
+                        return {"CLARIFY_WEEKLY_AMPM": clarify_info}
+                return None
+                
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse partial time clarification JSON: {result}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error checking time AM/PM clarification for partial weekly: {e}")
             return None
     
     # Note: parse_timezone method removed - now using TimezoneService.extract_timezone() 
