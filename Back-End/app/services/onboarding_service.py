@@ -397,7 +397,8 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
             extracted_info = await self.extract_schedule_from_conversation(
                 user_message, 
                 "",  # Don't use AI response for extraction - just user message
-                preferences
+                preferences,
+                user_id
             )
             
             # Save any extracted information IMMEDIATELY
@@ -683,7 +684,7 @@ Generate a natural acknowledgment + the specific question (max 40 words):
             logger.error(f"Error generating natural AI response: {e}")
             return {"response": "That's interesting! Tell me more about your daily routine - I'd love to help you create the perfect schedule."}
     
-    async def extract_schedule_from_conversation(self, user_message: str, ai_response: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
+    async def extract_schedule_from_conversation(self, user_message: str, ai_response: str, preferences: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         """Extract schedule information from natural conversation"""
         try:
             # Simplified, direct prompt
