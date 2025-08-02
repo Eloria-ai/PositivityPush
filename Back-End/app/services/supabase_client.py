@@ -218,6 +218,21 @@ class SupabaseService:
             logger.error(f"Error logging conversation: {e}")
             raise
     
+    async def get_conversation_by_message_id(self, wa_message_id: str) -> Optional[Dict[str, Any]]:
+        """Check if a message has already been processed by looking up the Twilio MessageSid"""
+        try:
+            result = (
+                self.client.table("conversations")
+                .select("id, subscriber_id, wa_message_id, timestamp")
+                .eq("wa_message_id", wa_message_id)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error checking conversation by message ID: {e}")
+            return None
+    
     async def get_conversation_history(
         self, 
         subscriber_id: str, 

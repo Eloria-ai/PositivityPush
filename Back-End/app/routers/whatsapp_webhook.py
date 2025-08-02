@@ -12,7 +12,6 @@ from datetime import datetime
 from app.config import settings
 from app.deps import get_supabase_client
 from app.services.whatsapp_service import WhatsAppService
-from app.services.ai_coach import AICoachService
 from app.services.supabase_client import SupabaseService
 from app.services.onboarding_service import OnboardingService
 from app.services.timezone_service import TimezoneService
@@ -72,7 +71,6 @@ async def whatsapp_webhook(
         # Initialize services
         supabase_service = SupabaseService(db)
         whatsapp_service = WhatsAppService()
-        ai_coach = AICoachService()
         
         # Parse Twilio form data
         form_data = await request.form()
@@ -82,6 +80,7 @@ async def whatsapp_webhook(
         message_body = form_data.get("Body", "")
         from_number_raw = form_data.get("From", "")
         to_number = form_data.get("To", "")
+        message_sid = form_data.get("MessageSid", "")  # Twilio's unique message ID
         
         # Store both formats - raw for message sending, clean for database lookup
         from_number_full = from_number_raw  # Keep whatsapp:+31657779475 for sending
@@ -105,10 +104,10 @@ async def whatsapp_webhook(
                 from_number,  # Clean format for DB operations
                 from_number_full,  # Full format for message sending
                 to_number,
+                message_sid,  # Twilio message ID for deduplication
                 subscription,
                 supabase_service,
                 whatsapp_service,
-                ai_coach,
                 client_ip=client_ip,
                 correlation_id=correlation_id
             )
@@ -127,10 +126,10 @@ async def process_twilio_message(
     from_number: str,  # Clean format for DB operations (+31657779475)
     from_number_full: str,  # Full format for message sending (whatsapp:+31657779475)
     to_number: str,
+    message_sid: str,  # Twilio message ID for deduplication
     subscription: dict,
     supabase_service: SupabaseService,
     whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService,
     client_ip: str = None,
     correlation_id: str = None
 ):
@@ -141,12 +140,12 @@ async def process_twilio_message(
     # Check if this is an activation message
     if message_body.startswith("POSITIVITY-PUSH START"):
         await handle_activation_message(
-            from_number, message_body, supabase_service, whatsapp_service, ai_coach, correlation_id
+            from_number, message_body, supabase_service, whatsapp_service, correlation_id
         )
     else:
         # Handle regular coaching conversation - use full format for message sending
         await handle_coaching_message_with_subscription(
-            from_number_full, message_body, None, subscription, supabase_service, whatsapp_service, ai_coach, client_ip=client_ip, message_metadata=None, correlation_id=correlation_id
+            from_number_full, message_body, message_sid, subscription, supabase_service, whatsapp_service, client_ip=client_ip, message_metadata=None, correlation_id=correlation_id
         )
 
 async def handle_activation_message(
@@ -154,7 +153,6 @@ async def handle_activation_message(
     message_text: str,
     supabase_service: SupabaseService,
     whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService,
     correlation_id: str = None
 ):
     """
@@ -250,7 +248,6 @@ async def handle_coaching_message_with_subscription(
     subscription: dict,
     supabase_service: SupabaseService,
     whatsapp_service: WhatsAppService,
-    ai_coach: AICoachService,
     client_ip: str = None,
     message_metadata: dict = None,
     correlation_id: str = None
@@ -268,6 +265,14 @@ async def handle_coaching_message_with_subscription(
                 "❌ No active subscription found. Please complete your payment first at https://positivity-push.vercel.app"
             )
             return
+        
+        # Deduplication: Check if we've already processed this message
+        if message_id:
+            # Check if we've already processed this Twilio MessageSid
+            existing_conversation = await supabase_service.get_conversation_by_message_id(message_id)
+            if existing_conversation:
+                logger.info(f"Duplicate message detected - already processed MessageSid: {message_id}")
+                return  # Skip processing duplicate message
         
         # Note: Automatic timezone detection removed - users now update timezone manually
         # via natural language (e.g., "I'm in London now") or during onboarding
@@ -372,7 +377,7 @@ async def handle_coaching_message_with_subscription(
             
             return
         
-        # Log conversation
+        # Log user conversation immediately
         await supabase_service.log_conversation(
             subscription["id"],
             message_text,
@@ -380,25 +385,19 @@ async def handle_coaching_message_with_subscription(
             message_id
         )
         
-        # Generate AI response
-        ai_response = await ai_coach.generate_response(
-            user_id=subscription["id"],
-            message=message_text,
-            user_context=subscription
+        # Dispatch AI response generation to background task (prevents webhook timeout)
+        from worker.tasks.ai_coach_async import send_ai_coach_response_async
+        task = send_ai_coach_response_async.delay(
+            subscription["id"],  # user_id
+            wa_id,              # wa_id (format: whatsapp:+1234567890)
+            message_text,       # user_message
+            subscription,       # user_context
+            message_id,         # message_sid
+            correlation_id      # correlation_id
         )
         
-        # Send AI response
-        await whatsapp_service.send_message(wa_id, ai_response)
-        
-        # Log AI response
-        await supabase_service.log_conversation(
-            subscription["id"],
-            ai_response,
-            "assistant",
-            None
-        )
-        
-        logger.info(f"Successfully handled coaching message for {wa_id}")
+        logger.info(f"AI coach response queued for background processing", 
+                   task_id=task.id, wa_id=wa_id, correlation_id=correlation_id)
         
     except Exception as e:
         logger.error(f"Error in coaching conversation: {e}")
