@@ -596,6 +596,10 @@ RECENT CONVERSATION:
         for item in required_items:
             if preferences.get(item):
                 collected[item] = preferences[item]
+            elif item == 'weekly_reflection' and preferences.get('weekly_reflection_partial_day'):
+                # Include partial weekly reflection progress
+                collected['weekly_reflection_partial_day'] = preferences['weekly_reflection_partial_day']
+                missing.append(item)  # Still missing complete weekly_reflection
             else:
                 missing.append(item)
         
