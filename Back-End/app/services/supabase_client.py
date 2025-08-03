@@ -6,6 +6,8 @@ Handles all database operations for subscriptions, conversations, and user data.
 from typing import Dict, Any, List, Optional
 from supabase import Client
 import logging
+from datetime import datetime, timedelta
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +162,24 @@ class SupabaseService:
             return False
     
     async def mark_onboarding_completed(self, user_id: str) -> bool:
-        """Mark user's onboarding as completed"""
-        return await self.set_preference_value(user_id, "onboarding_completed", True)
+        """Mark user's onboarding as completed and create scheduled messages"""
+        # CRITICAL: Always complete onboarding first - this MUST succeed
+        success = await self.set_preference_value(user_id, "onboarding_completed", True)
+        
+        if success:
+            # NEW: Create scheduled messages for the user (safe to fail)
+            try:
+                message_creation_success = await self.create_scheduled_messages_for_user(user_id)
+                if message_creation_success:
+                    logger.info(f"✅ Onboarding completed and scheduled messages created for user {user_id}")
+                else:
+                    logger.warning(f"⚠️ Onboarding completed but scheduled message creation failed for user {user_id}")
+            except Exception as e:
+                logger.error(f"⚠️ Onboarding completed but scheduled message creation errored for user {user_id}: {e}")
+                # Don't return False - onboarding completion should never fail due to scheduling issues
+        
+        # Always return the original onboarding completion result
+        return success
     
     async def get_users_needing_onboarding(self) -> List[Dict[str, Any]]:
         """Get users who haven't completed onboarding yet"""
@@ -586,18 +604,240 @@ class SupabaseService:
             logger.error(f"Error scheduling onboarding message: {e}")
             return None
 
+    async def create_scheduled_messages_for_user(self, user_id: str) -> bool:
+        """
+        Create all scheduled messages for newly onboarded user
+        Creates 7 message types: 3 fixed affirmations + 4 user-customized messages
+        """
+        try:
+            # Get user data
+            preferences = await self.get_user_preferences(user_id)
+            
+            # Get subscriber data for fixed affirmation times
+            subscriber_result = self.client.table("subscribers") \
+                .select("id, current_timezone, morning_positivity, midday_positivity, afternoon_positivity") \
+                .eq("id", user_id) \
+                .execute()
+            
+            if not subscriber_result.data:
+                logger.error(f"Subscriber not found for user {user_id}")
+                return False
+                
+            subscriber = subscriber_result.data[0]
+            user_timezone = subscriber.get("current_timezone") or preferences.get("current_timezone", "UTC")
+            
+            # Validate timezone
+            try:
+                tz = pytz.timezone(user_timezone)
+            except pytz.exceptions.UnknownTimeZoneError:
+                logger.warning(f"Unknown timezone {user_timezone} for user {user_id}, using UTC")
+                tz = pytz.UTC
+                user_timezone = "UTC"
+            
+            # Get current time in user timezone
+            now_utc = datetime.now(pytz.UTC)
+            now_user = now_utc.astimezone(tz)
+            today_user = now_user.date()
+            
+            messages_to_create = []
+            
+            # 1. Fixed Affirmation Messages (3 messages)
+            fixed_messages = [
+                {
+                    "message_type": "daily_affirmation",
+                    "time_key": "morning_positivity",
+                    "default_time": "08:00"
+                },
+                {
+                    "message_type": "midday_boost", 
+                    "time_key": "midday_positivity",
+                    "default_time": "12:00"
+                },
+                {
+                    "message_type": "evening_wind_down",
+                    "time_key": "afternoon_positivity", 
+                    "default_time": "16:00"
+                }
+            ]
+            
+            for msg in fixed_messages:
+                time_str = subscriber.get(msg["time_key"], msg["default_time"])
+                scheduled_time = self._calculate_next_daily_occurrence(today_user, time_str, tz)
+                
+                messages_to_create.append({
+                    "subscriber_id": user_id,
+                    "message_type": msg["message_type"],
+                    "scheduled_for": scheduled_time.isoformat(),
+                    "status": "pending",
+                    "content": ""  # Empty string for AI-generated content
+                })
+            
+            # 2. User-Customized Messages (4 messages)
+            customized_messages = [
+                {
+                    "message_type": "day_planning",
+                    "pref_key": "day_planning"
+                },
+                {
+                    "message_type": "accountability_checkin",
+                    "pref_key": "accountability_checkin"
+                },
+                {
+                    "message_type": "gratitude_prompt",
+                    "pref_key": "evening_gratitude"
+                }
+            ]
+            
+            for msg in customized_messages:
+                time_str = preferences.get(msg["pref_key"])
+                if time_str:
+                    # Parse AM/PM format to 24-hour
+                    parsed_time = self._parse_ampm_time(time_str)
+                    if parsed_time:
+                        scheduled_time = self._calculate_next_daily_occurrence(today_user, parsed_time, tz)
+                        messages_to_create.append({
+                            "subscriber_id": user_id,
+                            "message_type": msg["message_type"],
+                            "scheduled_for": scheduled_time.isoformat(),
+                            "status": "pending",
+                            "content": ""
+                        })
+            
+            # 3. Weekly Reflection Message
+            weekly_reflection = preferences.get("weekly_reflection")
+            if weekly_reflection and isinstance(weekly_reflection, dict):
+                day = weekly_reflection.get("day", "sunday").lower()
+                time_str = weekly_reflection.get("time", "11:00 AM")
+                
+                parsed_time = self._parse_ampm_time(time_str)
+                if parsed_time:
+                    scheduled_time = self._calculate_next_weekly_occurrence(today_user, day, parsed_time, tz)
+                    messages_to_create.append({
+                        "subscriber_id": user_id,
+                        "message_type": "weekly_reflection",
+                        "scheduled_for": scheduled_time.isoformat(),
+                        "status": "pending",
+                        "content": ""
+                    })
+            
+            # Batch insert all scheduled messages
+            if messages_to_create:
+                result = self.client.table("scheduled_messages") \
+                    .insert(messages_to_create) \
+                    .execute()
+                
+                created_count = len(result.data) if result.data else 0
+                logger.info(f"Created {created_count} scheduled messages for user {user_id}")
+                return True
+            else:
+                logger.warning(f"No scheduled messages created for user {user_id} - missing preferences")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error creating scheduled messages for user {user_id}: {e}")
+            return False
+    
+    def _parse_ampm_time(self, time_str: str) -> str:
+        """Parse AM/PM time format to 24-hour format"""
+        try:
+            # Handle formats like "7:00 AM", "1:15 PM", "7 AM", etc.
+            time_str = time_str.strip().upper()
+            
+            # Add :00 if only hour is specified
+            if " AM" in time_str or " PM" in time_str:
+                time_part = time_str.replace(" AM", "").replace(" PM", "")
+                if ":" not in time_part:
+                    time_part += ":00"
+                time_str = time_part + (" AM" if " AM" in time_str else " PM")
+            
+            # Parse to datetime and extract 24-hour format
+            dt = datetime.strptime(time_str, "%I:%M %p")
+            return dt.strftime("%H:%M")
+            
+        except Exception as e:
+            logger.error(f"Error parsing time '{time_str}': {e}")
+            return None
+    
+    def _calculate_next_daily_occurrence(self, today, time_str: str, tz) -> datetime:
+        """Calculate next occurrence of daily time in user timezone"""
+        try:
+            hour, minute = map(int, time_str.split(":"))
+            
+            # Create datetime for today at specified time
+            target_time = tz.localize(datetime.combine(today, datetime.min.time().replace(hour=hour, minute=minute)))
+            
+            # If time has already passed today, schedule for tomorrow
+            now_tz = datetime.now(tz)
+            if target_time <= now_tz:
+                target_time += timedelta(days=1)
+            
+            # Convert to UTC for database storage
+            return target_time.astimezone(pytz.UTC)
+            
+        except Exception as e:
+            logger.error(f"Error calculating daily occurrence for {time_str}: {e}")
+            # Fallback: schedule for next hour
+            return datetime.now(pytz.UTC) + timedelta(hours=1)
+    
+    def _calculate_next_weekly_occurrence(self, today, day_name: str, time_str: str, tz) -> datetime:
+        """Calculate next occurrence of weekly time in user timezone"""
+        try:
+            # Map day names to weekday numbers (Monday=0, Sunday=6)
+            day_mapping = {
+                "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+                "friday": 4, "saturday": 5, "sunday": 6
+            }
+            
+            target_weekday = day_mapping.get(day_name.lower(), 6)  # Default to Sunday
+            current_weekday = today.weekday()
+            
+            # Calculate days until target weekday
+            days_ahead = target_weekday - current_weekday
+            if days_ahead <= 0:  # Target day already happened this week
+                days_ahead += 7
+            
+            target_date = today + timedelta(days=days_ahead)
+            hour, minute = map(int, time_str.split(":"))
+            
+            # Create datetime for target day at specified time
+            target_time = tz.localize(datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute)))
+            
+            # Convert to UTC for database storage
+            return target_time.astimezone(pytz.UTC)
+            
+        except Exception as e:
+            logger.error(f"Error calculating weekly occurrence for {day_name} {time_str}: {e}")
+            # Fallback: schedule for next Sunday at noon
+            return datetime.now(pytz.UTC) + timedelta(days=7)
+
     async def populate_scheduled_messages_from_preferences(self) -> int:
         """Migration utility: populate scheduled_messages from user preferences"""
         try:
-            # Get all active subscribers with preferences
+            # Get all active subscribers with completed onboarding
             result = self.client.table("subscribers") \
                 .select("id, current_timezone, preferences") \
                 .eq("status", "active") \
+                .filter("preferences->>onboarding_completed", "eq", "true") \
                 .execute()
             
             migrated_count = 0
-            # Implementation would create scheduled_messages entries based on user preferences
-            # This is a placeholder for the actual migration logic
+            
+            for subscriber in result.data:
+                user_id = subscriber["id"]
+                
+                # Check if user already has scheduled messages
+                existing_messages = self.client.table("scheduled_messages") \
+                    .select("id") \
+                    .eq("subscriber_id", user_id) \
+                    .limit(1) \
+                    .execute()
+                
+                if not existing_messages.data:
+                    # Create scheduled messages for this user
+                    success = await self.create_scheduled_messages_for_user(user_id)
+                    if success:
+                        migrated_count += 1
+                        logger.info(f"Migrated user {user_id} to scheduled messages")
             
             logger.info(f"Migrated {migrated_count} users to scheduled_messages")
             return migrated_count
