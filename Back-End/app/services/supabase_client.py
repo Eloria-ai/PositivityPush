@@ -443,7 +443,7 @@ class SupabaseService:
                 
                 # IMPORTANT: This requires the following RPC function in Supabase SQL Editor:
                 # CREATE OR REPLACE FUNCTION execute_raw_sql(query text)
-                # RETURNS TABLE(id bigint, subscriber_id uuid, message_type text, scheduled_for timestamptz)
+                # RETURNS TABLE(id bigint, subscriber_id uuid, message_type varchar(30), scheduled_for timestamptz)
                 # LANGUAGE plpgsql SECURITY DEFINER
                 # AS $$
                 # BEGIN

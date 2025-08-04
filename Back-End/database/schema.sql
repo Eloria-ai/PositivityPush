@@ -144,7 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_messages_subscriber ON scheduled_messag
 
 -- Execute Raw SQL function for SKIP LOCKED operations
 CREATE OR REPLACE FUNCTION execute_raw_sql(query text)
-RETURNS TABLE(id bigint, subscriber_id uuid, message_type text, scheduled_for timestamptz)
+RETURNS TABLE(id bigint, subscriber_id uuid, message_type varchar(30), scheduled_for timestamptz)
 LANGUAGE plpgsql 
 SECURITY DEFINER
 SET search_path = ''
