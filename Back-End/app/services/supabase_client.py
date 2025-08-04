@@ -164,6 +164,7 @@ class SupabaseService:
     async def mark_onboarding_completed(self, user_id: str) -> bool:
         """Mark user's onboarding as completed and create scheduled messages"""
         # CRITICAL: Always complete onboarding first - this MUST succeed
+        # Force deployment verification
         success = await self.set_preference_value(user_id, "onboarding_completed", True)
         
         if success:
