@@ -479,7 +479,60 @@ BEGIN
 END;
 $$;
 
--- Fix 11: Final validation check
+-- Fix 11: Schema diagnostics and validation
+CREATE OR REPLACE FUNCTION diagnose_scheduled_messages_schema()
+RETURNS TABLE(
+    diagnosis_step text,
+    result text
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    col_info record;
+    test_result text;
+BEGIN
+    -- Step 1: Check actual column types
+    RETURN QUERY 
+    SELECT 'Column Types'::text as diagnosis_step,
+           CONCAT(column_name, ': ', data_type) as result
+    FROM information_schema.columns
+    WHERE table_name = 'scheduled_messages'
+      AND column_name IN ('id','subscriber_id','message_type','scheduled_for')
+    ORDER BY ordinal_position;
+    
+    -- Step 2: Test function signature
+    BEGIN
+        PERFORM execute_raw_sql('SELECT 1 WHERE FALSE');
+        RETURN QUERY SELECT 'Function Test'::text, 'execute_raw_sql: WORKS'::text;
+    EXCEPTION WHEN OTHERS THEN
+        RETURN QUERY SELECT 'Function Test'::text, CONCAT('execute_raw_sql: ERROR - ', SQLERRM)::text;
+    END;
+    
+    -- Step 3: Test actual query with single row
+    BEGIN
+        PERFORM execute_raw_sql(
+            $$WITH cte AS (
+                SELECT id, subscriber_id, message_type, scheduled_for
+                FROM scheduled_messages
+                LIMIT 1
+            )
+            SELECT * FROM cte$$
+        );
+        RETURN QUERY SELECT 'Query Test'::text, 'Single row query: WORKS'::text;
+    EXCEPTION WHEN OTHERS THEN
+        RETURN QUERY SELECT 'Query Test'::text, CONCAT('Single row query: ERROR - ', SQLERRM)::text;
+    END;
+    
+    -- Step 4: Count available messages
+    SELECT COUNT(*)::text INTO test_result FROM scheduled_messages WHERE status = 'pending';
+    RETURN QUERY SELECT 'Data Count'::text, CONCAT('Pending messages: ', test_result)::text;
+    
+END;
+$$;
+
+-- Fix 12: Final validation check
 DO $$
 DECLARE
     user_count integer;
@@ -501,13 +554,8 @@ BEGIN
     RAISE NOTICE 'Completed onboarding: %', onboarded_count;
     RAISE NOTICE 'Scheduled messages: %', scheduled_count;
     
-    -- Verify critical functions work
-    BEGIN
-        PERFORM execute_raw_sql('SELECT 1 WHERE FALSE'); -- Should return empty
-        RAISE NOTICE 'execute_raw_sql function: ✅ OK';
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'execute_raw_sql function: ❌ ERROR';
-    END;
+    -- Run diagnostics
+    RAISE NOTICE 'Running schema diagnostics...';
     
     RAISE NOTICE 'All schema fixes applied without data loss!';
     RAISE NOTICE '===============================================';

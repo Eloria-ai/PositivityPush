@@ -450,7 +450,13 @@ class SupabaseService:
                 # END;
                 # $$;
                 
+                # Debug: Log the exact SQL query being sent
+                logger.debug(f"🔍 SQL Query for execute_raw_sql: {repr(sql)}")
+                logger.debug(f"🔍 SQL Query length: {len(sql)} chars")
+                logger.debug(f"🔍 SQL Query first 100 chars: {sql[:100]}")
+                
                 result = self.client.rpc("execute_raw_sql", {"query": sql}).execute()
+                logger.debug(f"🔍 RPC result data count: {len(result.data) if result.data else 0}")
                 return result.data if result.data else []
             else:
                 # Fallback without SKIP LOCKED (for testing)
