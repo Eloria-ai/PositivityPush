@@ -352,7 +352,9 @@ CREATE TRIGGER validate_user_preferences_trigger
     FOR EACH ROW
     EXECUTE FUNCTION validate_user_preferences();
 
--- Fix 6: Helper function for monitoring scheduled messages
+-- Fix 6: Helper function for monitoring scheduled messages (CORRECTED TYPES)
+DROP FUNCTION IF EXISTS get_user_scheduled_messages(uuid);
+
 CREATE OR REPLACE FUNCTION get_user_scheduled_messages(user_uuid uuid)
 RETURNS TABLE(
     id bigint,
@@ -397,7 +399,87 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
 
--- Fix 10: Final validation check
+-- Fix 10: Debug function to manually trigger scheduled message creation
+CREATE OR REPLACE FUNCTION debug_create_scheduled_messages(user_email text)
+RETURNS TABLE(
+    message_type varchar(30),
+    scheduled_for timestamptz,
+    status varchar(20)
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    user_record subscribers%ROWTYPE;
+    user_prefs jsonb;
+    user_tz text;
+    base_date date;
+BEGIN
+    -- Get user data
+    SELECT * INTO user_record FROM subscribers WHERE email = user_email;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'User not found: %', user_email;
+    END IF;
+    
+    user_prefs := user_record.preferences;
+    user_tz := COALESCE(user_record.current_timezone, 'UTC');
+    base_date := CURRENT_DATE + INTERVAL '1 day';
+    
+    -- Create 7 scheduled messages
+    -- 1. Daily affirmation (fixed 8 AM)
+    INSERT INTO scheduled_messages (subscriber_id, message_type, scheduled_for, status, content)
+    VALUES (user_record.id, 'daily_affirmation', 
+            (base_date + TIME '08:00') AT TIME ZONE user_tz, 'pending', '');
+    
+    -- 2. Midday boost (fixed 12 PM) 
+    INSERT INTO scheduled_messages (subscriber_id, message_type, scheduled_for, status, content)
+    VALUES (user_record.id, 'midday_boost',
+            (base_date + TIME '12:00') AT TIME ZONE user_tz, 'pending', '');
+    
+    -- 3. Evening wind down (fixed 4 PM)
+    INSERT INTO scheduled_messages (subscriber_id, message_type, scheduled_for, status, content)
+    VALUES (user_record.id, 'evening_wind_down',
+            (base_date + TIME '16:00') AT TIME ZONE user_tz, 'pending', '');
+    
+    -- 4. Day planning (user custom)
+    IF user_prefs->>'day_planning' IS NOT NULL THEN
+        INSERT INTO scheduled_messages (subscriber_id, message_type, scheduled_for, status, content)
+        VALUES (user_record.id, 'day_planning',
+                (base_date + TIME '16:38') AT TIME ZONE user_tz, 'pending', '');
+    END IF;
+    
+    -- 5. Accountability checkin (user custom)
+    IF user_prefs->>'accountability_checkin' IS NOT NULL THEN
+        INSERT INTO scheduled_messages (subscriber_id, message_type, scheduled_for, status, content)
+        VALUES (user_record.id, 'accountability_checkin',
+                (base_date + TIME '16:39') AT TIME ZONE user_tz, 'pending', '');
+    END IF;
+    
+    -- 6. Gratitude prompt (user custom)  
+    IF user_prefs->>'evening_gratitude' IS NOT NULL THEN
+        INSERT INTO scheduled_messages (subscriber_id, message_type, scheduled_for, status, content)
+        VALUES (user_record.id, 'gratitude_prompt',
+                (base_date + TIME '16:40') AT TIME ZONE user_tz, 'pending', '');
+    END IF;
+    
+    -- 7. Weekly reflection (user custom)
+    IF user_prefs->>'weekly_reflection' IS NOT NULL THEN
+        INSERT INTO scheduled_messages (subscriber_id, message_type, scheduled_for, status, content)
+        VALUES (user_record.id, 'weekly_reflection',
+                (DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '8 days' + TIME '16:41') AT TIME ZONE user_tz, 'pending', '');
+    END IF;
+    
+    -- Return created messages
+    RETURN QUERY
+    SELECT sm.message_type, sm.scheduled_for, sm.status
+    FROM scheduled_messages sm
+    WHERE sm.subscriber_id = user_record.id
+    ORDER BY sm.scheduled_for;
+END;
+$$;
+
+-- Fix 11: Final validation check
 DO $$
 DECLARE
     user_count integer;
