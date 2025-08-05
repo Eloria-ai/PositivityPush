@@ -423,24 +423,22 @@ class SupabaseService:
         try:
             if use_skip_locked:
                 # Use raw SQL with SKIP LOCKED for atomic queue+lock operation
-                sql = f"""
-                    WITH cte AS (
-                        SELECT id, subscriber_id, message_type, scheduled_for
-                        FROM   scheduled_messages
-                        WHERE  status = 'pending'
-                        AND    scheduled_for <= now()
-                        ORDER  BY scheduled_for
-                        LIMIT  {batch_size}
-                        FOR UPDATE SKIP LOCKED
-                    )
-                    UPDATE scheduled_messages
-                    SET    status = 'queued',
-                           updated_at = now()
-                    FROM   cte
-                    WHERE  scheduled_messages.id = cte.id
-                    RETURNING scheduled_messages.id, scheduled_messages.subscriber_id, 
-                              scheduled_messages.message_type, scheduled_messages.scheduled_for;
-                """
+                sql = f"""WITH cte AS (
+                    SELECT id, subscriber_id, message_type, scheduled_for
+                    FROM   scheduled_messages
+                    WHERE  status = 'pending'
+                    AND    scheduled_for <= now()
+                    ORDER  BY scheduled_for
+                    LIMIT  {batch_size}
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE scheduled_messages
+                SET    status = 'queued',
+                       updated_at = now()
+                FROM   cte
+                WHERE  scheduled_messages.id = cte.id
+                RETURNING scheduled_messages.id, scheduled_messages.subscriber_id, 
+                          scheduled_messages.message_type, scheduled_messages.scheduled_for;"""
                 
                 # IMPORTANT: This requires the following RPC function in Supabase SQL Editor:
                 # CREATE OR REPLACE FUNCTION execute_raw_sql(query text)
@@ -803,21 +801,38 @@ class SupabaseService:
             return False
     
     def _parse_ampm_time(self, time_str: str) -> str:
-        """Parse AM/PM time format to 24-hour format"""
+        """Parse both AM/PM and 24-hour time formats to 24-hour format"""
         try:
-            # Handle formats like "7:00 AM", "1:15 PM", "7 AM", etc.
             time_str = time_str.strip().upper()
             
-            # Add :00 if only hour is specified
+            # Check if it's already in 24-hour format (e.g., "08:00", "13:45")
+            if ":" in time_str and " AM" not in time_str and " PM" not in time_str:
+                # Validate it's a valid 24-hour time
+                parts = time_str.split(":")
+                if len(parts) == 2:
+                    hour, minute = int(parts[0]), int(parts[1])
+                    if 0 <= hour <= 23 and 0 <= minute <= 59:
+                        return f"{hour:02d}:{minute:02d}"
+            
+            # Handle AM/PM formats like "7:00 AM", "1:15 PM", "7 AM", etc.
             if " AM" in time_str or " PM" in time_str:
                 time_part = time_str.replace(" AM", "").replace(" PM", "")
                 if ":" not in time_part:
                     time_part += ":00"
                 time_str = time_part + (" AM" if " AM" in time_str else " PM")
+                
+                # Parse to datetime and extract 24-hour format
+                dt = datetime.strptime(time_str, "%I:%M %p")
+                return dt.strftime("%H:%M")
             
-            # Parse to datetime and extract 24-hour format
-            dt = datetime.strptime(time_str, "%I:%M %p")
-            return dt.strftime("%H:%M")
+            # If no AM/PM and not valid 24-hour, try to parse as hour only
+            if time_str.isdigit():
+                hour = int(time_str)
+                if 0 <= hour <= 23:
+                    return f"{hour:02d}:00"
+            
+            logger.warning(f"Could not parse time format: '{time_str}'")
+            return None
             
         except Exception as e:
             logger.error(f"Error parsing time '{time_str}': {e}")
