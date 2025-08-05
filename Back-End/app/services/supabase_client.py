@@ -223,12 +223,13 @@ class SupabaseService:
     ) -> Dict[str, Any]:
         """Log conversation message"""
         try:
+            from datetime import datetime
             conversation_data = {
                 "subscriber_id": subscriber_id,
                 "content": content,
                 "message_type": message_type,  # 'user' or 'assistant'
                 "wa_message_id": wa_message_id,
-                "timestamp": "now()"
+                "timestamp": datetime.utcnow().isoformat() + "+00:00"
             }
             
             result = self.client.table("conversations").insert(conversation_data).execute()
@@ -519,22 +520,70 @@ class SupabaseService:
             return None
     
     async def mark_message_sent(self, message_id: int) -> bool:
-        """Mark message as successfully sent"""
+        """Mark message as successfully sent and schedule next occurrence"""
         try:
-            from datetime import datetime
+            from datetime import datetime, timedelta
+            
+            # First, get the message details to schedule next occurrence
+            message_result = self.client.table("scheduled_messages") \
+                .select("id, subscriber_id, message_type, scheduled_for") \
+                .eq("id", message_id) \
+                .execute()
+            
+            if not message_result.data:
+                logger.error(f"Message {message_id} not found for rescheduling")
+                return False
+                
+            message = message_result.data[0]
+            message_type = message["message_type"]
+            subscriber_id = message["subscriber_id"]
+            current_scheduled_for = datetime.fromisoformat(message["scheduled_for"].replace('Z', '+00:00'))
+            
+            # Mark current message as sent
             result = self.client.table("scheduled_messages") \
                 .update({
                     "status": "sent",
-                    "updated_at": datetime.utcnow().isoformat()
+                    "updated_at": datetime.utcnow().isoformat() + "+00:00"
                 }) \
                 .eq("id", message_id) \
                 .execute()
             
-            logger.info(f"Marked message {message_id} as sent")
+            # Schedule next occurrence for recurring messages
+            next_scheduled_time = None
+            
+            if message_type in ["daily_affirmation", "midday_boost", "evening_wind_down", 
+                               "day_planning", "accountability_checkin", "gratitude_prompt"]:
+                # Daily messages: schedule for next day at same time
+                next_scheduled_time = current_scheduled_for + timedelta(days=1)
+                
+            elif message_type == "weekly_reflection":
+                # Weekly messages: schedule for next week at same time
+                next_scheduled_time = current_scheduled_for + timedelta(weeks=1)
+            
+            # Create next occurrence if this is a recurring message
+            if next_scheduled_time:
+                next_message_data = {
+                    "subscriber_id": subscriber_id,
+                    "message_type": message_type,
+                    "scheduled_for": next_scheduled_time.isoformat(),
+                    "status": "pending",
+                    "content": ""  # Will be generated when dispatched
+                }
+                
+                next_result = self.client.table("scheduled_messages").insert(next_message_data).execute()
+                
+                if next_result.data:
+                    next_message_id = next_result.data[0]["id"]
+                    logger.info(f"Message {message_id} sent and next occurrence {next_message_id} scheduled for {next_scheduled_time}")
+                else:
+                    logger.warning(f"Message {message_id} sent but failed to schedule next occurrence")
+            else:
+                logger.info(f"Non-recurring message {message_id} marked as sent")
+            
             return True
             
         except Exception as e:
-            logger.error(f"Error marking message sent: {e}")
+            logger.error(f"Error marking message sent and rescheduling: {e}")
             return False
     
     async def mark_message_failed(self, message_id: int, error: str) -> bool:
@@ -611,8 +660,11 @@ class SupabaseService:
         Creates 7 message types: 3 fixed affirmations + 4 user-customized messages
         """
         try:
+            logger.info(f"🔧 Starting scheduled message creation for user {user_id}")
+            
             # Get user data
             preferences = await self.get_user_preferences(user_id)
+            logger.debug(f"User preferences: {preferences}")
             
             # Get subscriber data for fixed affirmation times
             subscriber_result = self.client.table("subscribers") \
@@ -621,17 +673,18 @@ class SupabaseService:
                 .execute()
             
             if not subscriber_result.data:
-                logger.error(f"Subscriber not found for user {user_id}")
+                logger.error(f"❌ Subscriber not found for user {user_id}")
                 return False
                 
             subscriber = subscriber_result.data[0]
             user_timezone = subscriber.get("current_timezone") or preferences.get("current_timezone", "UTC")
+            logger.info(f"📍 User timezone: {user_timezone}")
             
             # Validate timezone
             try:
                 tz = pytz.timezone(user_timezone)
             except pytz.exceptions.UnknownTimeZoneError:
-                logger.warning(f"Unknown timezone {user_timezone} for user {user_id}, using UTC")
+                logger.warning(f"⚠️ Unknown timezone {user_timezone} for user {user_id}, using UTC")
                 tz = pytz.UTC
                 user_timezone = "UTC"
             
@@ -639,6 +692,7 @@ class SupabaseService:
             now_utc = datetime.now(pytz.UTC)
             now_user = now_utc.astimezone(tz)
             today_user = now_user.date()
+            logger.debug(f"Current time in user timezone: {now_user}")
             
             messages_to_create = []
             
@@ -723,19 +777,29 @@ class SupabaseService:
             
             # Batch insert all scheduled messages
             if messages_to_create:
+                logger.info(f"📝 Creating {len(messages_to_create)} scheduled messages")
+                logger.debug(f"Messages to create: {[msg['message_type'] for msg in messages_to_create]}")
+                
                 result = self.client.table("scheduled_messages") \
                     .insert(messages_to_create) \
                     .execute()
                 
                 created_count = len(result.data) if result.data else 0
-                logger.info(f"Created {created_count} scheduled messages for user {user_id}")
-                return True
+                if created_count == len(messages_to_create):
+                    logger.info(f"✅ Successfully created {created_count} scheduled messages for user {user_id}")
+                    return True
+                else:
+                    logger.error(f"❌ Expected {len(messages_to_create)} messages but only created {created_count} for user {user_id}")
+                    return False
             else:
-                logger.warning(f"No scheduled messages created for user {user_id} - missing preferences")
+                logger.warning(f"⚠️ No scheduled messages created for user {user_id} - missing preferences")
+                logger.debug(f"Preferences available: {list(preferences.keys())}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error creating scheduled messages for user {user_id}: {e}")
+            logger.error(f"❌ Error creating scheduled messages for user {user_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     def _parse_ampm_time(self, time_str: str) -> str:
