@@ -152,15 +152,30 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+    trimmed_query text;
 BEGIN
     -- Add basic query validation for security
     IF query IS NULL OR query = '' THEN
         RAISE EXCEPTION 'Query cannot be null or empty';
     END IF;
     
-    -- Only allow WITH and UPDATE queries for SKIP LOCKED operations
-    IF UPPER(TRIM(query)) NOT LIKE 'WITH%' AND UPPER(TRIM(query)) NOT LIKE 'UPDATE%' THEN
-        RAISE EXCEPTION 'Only WITH/UPDATE queries allowed in this function';
+    -- Trim whitespace and check query type
+    trimmed_query := UPPER(TRIM(query));
+    
+    -- Allow WITH and UPDATE queries for SKIP LOCKED operations (more flexible matching)
+    IF trimmed_query NOT LIKE 'WITH %' 
+       AND trimmed_query NOT LIKE 'UPDATE %' 
+       AND trimmed_query NOT LIKE 'SELECT %' THEN
+        RAISE EXCEPTION 'Only WITH, UPDATE, or SELECT queries allowed in this function';
+    END IF;
+    
+    -- Additional security: prevent dangerous operations
+    IF trimmed_query LIKE '%DROP %' 
+       OR trimmed_query LIKE '%DELETE %' 
+       OR trimmed_query LIKE '%TRUNCATE %' 
+       OR trimmed_query LIKE '%ALTER %' THEN
+        RAISE EXCEPTION 'Dangerous operations not allowed';
     END IF;
     
     RETURN QUERY EXECUTE query;
