@@ -442,7 +442,7 @@ class SupabaseService:
                 
                 # IMPORTANT: This requires the following RPC function in Supabase SQL Editor:
                 # CREATE OR REPLACE FUNCTION execute_raw_sql(query text)
-                # RETURNS TABLE(id bigint, subscriber_id uuid, message_type varchar(30), scheduled_for timestamptz)
+                # RETURNS TABLE(id uuid, subscriber_id uuid, message_type varchar(30), scheduled_for timestamptz)
                 # LANGUAGE plpgsql SECURITY DEFINER
                 # AS $$
                 # BEGIN
@@ -475,7 +475,7 @@ class SupabaseService:
             logger.error(f"Error getting due scheduled messages: {e}")
             return []
     
-    async def get_message_with_user_context(self, message_id: int) -> Optional[Dict[str, Any]]:
+    async def get_message_with_user_context(self, message_id: str) -> Optional[Dict[str, Any]]:
         """Get message details with full subscriber context for AI generation"""
         try:
             # Join scheduled_messages with subscribers to get full context
@@ -507,7 +507,7 @@ class SupabaseService:
             logger.error(f"Error getting message with user context: {e}")
             return None
     
-    async def get_scheduled_message_content(self, message_id: int) -> Optional[Dict[str, Any]]:
+    async def get_scheduled_message_content(self, message_id: str) -> Optional[Dict[str, Any]]:
         """Get scheduled message with content field for pre-generated messages"""
         try:
             result = self.client.table("scheduled_messages") \
@@ -523,7 +523,7 @@ class SupabaseService:
             logger.error(f"Error getting scheduled message content: {e}")
             return None
     
-    async def mark_message_sent(self, message_id: int) -> bool:
+    async def mark_message_sent(self, message_id: str) -> bool:
         """Mark message as successfully sent and schedule next occurrence"""
         try:
             from datetime import datetime, timedelta
@@ -590,7 +590,7 @@ class SupabaseService:
             logger.error(f"Error marking message sent and rescheduling: {e}")
             return False
     
-    async def mark_message_failed(self, message_id: int, error: str) -> bool:
+    async def mark_message_failed(self, message_id: str, error: str) -> bool:
         """Mark message as failed with error details (prevents infinite requeues)"""
         try:
             from datetime import datetime
@@ -630,7 +630,7 @@ class SupabaseService:
             logger.error(f"Error cleaning up old messages: {e}")
             return 0
     
-    async def schedule_onboarding_message(self, subscriber_id: str, message_type: str, content: str, delay_seconds: int = 0) -> Optional[int]:
+    async def schedule_onboarding_message(self, subscriber_id: str, message_type: str, content: str, delay_seconds: int = 0) -> Optional[str]:
         """Schedule an onboarding message for unified dispatcher delivery"""
         try:
             from datetime import datetime, timedelta

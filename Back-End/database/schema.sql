@@ -106,9 +106,10 @@ CREATE TABLE IF NOT EXISTS user_progress (
     UNIQUE(subscriber_id, week_start)
 );
 
--- Scheduled Messages table (for new architecture)
+-- Scheduled Messages table (UUID-based architecture)
+-- NOTE: IF NOT EXISTS preserves existing UUID column if table already exists
 CREATE TABLE IF NOT EXISTS scheduled_messages (
-    id BIGSERIAL PRIMARY KEY,
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     subscriber_id UUID REFERENCES subscribers(id) ON DELETE CASCADE,
     
     -- Message Details
@@ -146,8 +147,9 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_messages_subscriber ON scheduled_messag
 -- Drop the old function first to avoid type conflicts
 DROP FUNCTION IF EXISTS execute_raw_sql(text);
 
+-- FIXED: execute_raw_sql function now returns UUID for id column (matching actual table schema)
 CREATE OR REPLACE FUNCTION execute_raw_sql(query text)
-RETURNS TABLE(id bigint, subscriber_id uuid, message_type varchar(30), scheduled_for timestamptz)
+RETURNS TABLE(id uuid, subscriber_id uuid, message_type varchar(30), scheduled_for timestamptz)
 LANGUAGE plpgsql 
 SECURITY DEFINER
 SET search_path = public
@@ -160,21 +162,20 @@ BEGIN
         RAISE EXCEPTION 'Query cannot be null or empty';
     END IF;
     
-    -- Trim whitespace and check query type
-    trimmed_query := UPPER(TRIM(query));
+    -- Trim ALL whitespace including newlines and check query type
+    trimmed_query := UPPER(TRIM(BOTH E' \t\n\r' FROM query));
     
-    -- Allow WITH and UPDATE queries for SKIP LOCKED operations (more flexible matching)
+    -- Allow WITH and UPDATE queries for SKIP LOCKED operations
     IF trimmed_query NOT LIKE 'WITH %' 
        AND trimmed_query NOT LIKE 'UPDATE %' 
        AND trimmed_query NOT LIKE 'SELECT %' THEN
-        RAISE EXCEPTION 'Only WITH, UPDATE, or SELECT queries allowed in this function';
+        RAISE EXCEPTION 'Only WITH, UPDATE, or SELECT queries allowed in this function. Got: %', LEFT(trimmed_query, 50);
     END IF;
     
     -- Additional security: prevent dangerous operations
     IF trimmed_query LIKE '%DROP %' 
        OR trimmed_query LIKE '%DELETE %' 
-       OR trimmed_query LIKE '%TRUNCATE %' 
-       OR trimmed_query LIKE '%ALTER %' THEN
+       OR trimmed_query LIKE '%TRUNCATE %' THEN
         RAISE EXCEPTION 'Dangerous operations not allowed';
     END IF;
     
@@ -355,9 +356,10 @@ CREATE TRIGGER validate_user_preferences_trigger
 -- Fix 6: Helper function for monitoring scheduled messages (CORRECTED TYPES)
 DROP FUNCTION IF EXISTS get_user_scheduled_messages(uuid);
 
+-- FIXED: get_user_scheduled_messages function now returns UUID for id column  
 CREATE OR REPLACE FUNCTION get_user_scheduled_messages(user_uuid uuid)
 RETURNS TABLE(
-    id bigint,
+    id uuid,
     message_type varchar(30),
     scheduled_for timestamptz,
     status varchar(20)

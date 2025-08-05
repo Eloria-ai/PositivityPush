@@ -121,7 +121,7 @@ def process_personalized_messages(self, batch_size: int = 500) -> Dict:
         raise e
 
 @shared_task(bind=True, max_retries=3)
-def dispatch_message(self, message_id: int) -> Dict:
+def dispatch_message(self, message_id: str) -> Dict:
     """
     DISPATCHER TASK: Handles individual message delivery.
     
