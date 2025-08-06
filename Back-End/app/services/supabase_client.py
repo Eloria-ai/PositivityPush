@@ -785,10 +785,13 @@ class SupabaseService:
             # 3. Weekly Reflection Message
             weekly_reflection = preferences.get("weekly_reflection")
             if weekly_reflection and isinstance(weekly_reflection, dict):
-                day = weekly_reflection.get("day", "sunday").lower()
-                time_str = weekly_reflection.get("time", "11:00 AM")
+                day_raw = weekly_reflection.get("day", "sunday")
+                time_raw = weekly_reflection.get("time", "11:00 AM")
                 
-                parsed_time = self._parse_ampm_time(time_str)
+                # Normalize day name (handles "wedsday" → "wednesday")
+                day = self._normalize_weekday(day_raw)
+                parsed_time = self._parse_ampm_time(time_raw)
+                
                 if parsed_time:
                     scheduled_time = self._calculate_next_weekly_occurrence(today_user, day, parsed_time, tz)
                     messages_to_create.append({
@@ -798,6 +801,9 @@ class SupabaseService:
                         "status": "pending",
                         "content": ""
                     })
+                    logger.info("Created weekly reflection for %s: %s at %s", user_id, day, time_raw)
+                else:
+                    logger.warning("weekly_reflection_invalid_time user_id=%s time=%s", user_id, time_raw)
             
             # Batch insert all scheduled messages
             if messages_to_create:
@@ -827,42 +833,74 @@ class SupabaseService:
             return False
     
     def _parse_ampm_time(self, time_str: str) -> str:
-        """Parse both AM/PM and 24-hour time formats to 24-hour format"""
+        """
+        Parse time in various formats to 24-hour format
+        Accepts: '7:03am', '7:03 am', '7am', '07:03', '19:10', '7'
+        Returns: 'HH:MM' or None
+        """
+        import re
+        
+        if not time_str:
+            return None
+            
+        s = time_str.strip().lower()
+        
         try:
-            time_str = time_str.strip().upper()
-            
-            # Check if it's already in 24-hour format (e.g., "08:00", "13:45")
-            if ":" in time_str and " AM" not in time_str and " PM" not in time_str:
-                # Validate it's a valid 24-hour time
-                parts = time_str.split(":")
-                if len(parts) == 2:
-                    hour, minute = int(parts[0]), int(parts[1])
-                    if 0 <= hour <= 23 and 0 <= minute <= 59:
-                        return f"{hour:02d}:{minute:02d}"
-            
-            # Handle AM/PM formats like "7:00 AM", "1:15 PM", "7 AM", etc.
-            if " AM" in time_str or " PM" in time_str:
-                time_part = time_str.replace(" AM", "").replace(" PM", "")
-                if ":" not in time_part:
-                    time_part += ":00"
-                time_str = time_part + (" AM" if " AM" in time_str else " PM")
-                
-                # Parse to datetime and extract 24-hour format
-                dt = datetime.strptime(time_str, "%I:%M %p")
-                return dt.strftime("%H:%M")
-            
-            # If no AM/PM and not valid 24-hour, try to parse as hour only
-            if time_str.isdigit():
-                hour = int(time_str)
-                if 0 <= hour <= 23:
-                    return f"{hour:02d}:00"
-            
-            logger.warning(f"Could not parse time format: '{time_str}'")
+            # 24-hour 'HH:MM' format
+            m24 = re.fullmatch(r'([01]?\d|2[0-3]):([0-5]\d)', s)
+            if m24:
+                return f"{int(m24.group(1)):02d}:{int(m24.group(2)):02d}"
+
+            # 12-hour variants: 'h', 'h:mm', optional space, optional a|am|p|pm
+            m12 = re.fullmatch(r'(\d{1,2})(?::?([0-5]\d))?\s*(a|am|p|pm)?', s)
+            if m12:
+                h = int(m12.group(1))
+                m = int(m12.group(2) or 0)
+                suf = (m12.group(3) or "").lower()
+
+                if suf:  # 12h with am/pm
+                    if not (1 <= h <= 12):
+                        return None
+                    if suf in ("p", "pm") and h != 12:
+                        h += 12
+                    if suf in ("a", "am") and h == 12:
+                        h = 0
+                    return f"{h:02d}:{m:02d}"
+                else:
+                    # No suffix -> treat as 24h hour only, e.g., '7' -> 07:00
+                    if 0 <= h <= 23 and 0 <= m <= 59:
+                        return f"{h:02d}:{m:02d}"
+
+            logger.warning("Could not parse time format: %s", time_str)
             return None
             
         except Exception as e:
-            logger.error(f"Error parsing time '{time_str}': {e}")
+            logger.error("Error parsing time %s: %s", time_str, str(e))
             return None
+    
+    def _normalize_weekday(self, s: str) -> str:
+        """Normalize weekday names including common typos and abbreviations"""
+        import difflib
+        
+        _WEEKDAY_ALIASES = {
+            "mon": "monday", "monday": "monday",
+            "tue": "tuesday", "tues": "tuesday", "tuesday": "tuesday", 
+            "wed": "wednesday", "weds": "wednesday", "wednes": "wednesday", "wednesday": "wednesday",
+            "wednsday": "wednesday", "wendsday": "wednesday", "wedsday": "wednesday",  # common typos
+            "thu": "thursday", "thur": "thursday", "thurs": "thursday", "thursday": "thursday",
+            "fri": "friday", "friday": "friday",
+            "sat": "saturday", "saturday": "saturday",
+            "sun": "sunday", "sunday": "sunday",
+        }
+        
+        key = (s or "").strip().lower()
+        if key in _WEEKDAY_ALIASES:
+            return _WEEKDAY_ALIASES[key]
+            
+        # Fuzzy fallback for rarer typos
+        _WEEKDAY_CANON = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        match = difflib.get_close_matches(key, _WEEKDAY_CANON, n=1, cutoff=0.6)
+        return match[0] if match else "sunday"  # Default fallback
     
     def _calculate_next_daily_occurrence(self, today, time_str: str, tz) -> datetime:
         """Calculate next occurrence of daily time in user timezone"""
