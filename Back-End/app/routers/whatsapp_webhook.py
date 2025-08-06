@@ -307,8 +307,8 @@ async def handle_coaching_message_with_subscription(
                 completion_status = await onboarding_service.check_completion_status(updated_preferences)
                 
                 if completion_status["is_complete"]:
-                    # Onboarding is complete! Send completion message
-                    await supabase_service.set_preference_value(subscription["id"], "onboarding_completed", True)
+                    # Onboarding is complete! Send completion message and create scheduled messages
+                    await supabase_service.mark_onboarding_completed(subscription["id"])
                     await supabase_service.set_preference_value(subscription["id"], "onboarding_step", None)
                     
                     completion_message = onboarding_service.get_completion_message()
