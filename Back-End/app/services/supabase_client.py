@@ -563,14 +563,19 @@ class SupabaseService:
             subscriber_id = message["subscriber_id"]
             current_scheduled_for = datetime.fromisoformat(message["scheduled_for"].replace('Z', '+00:00'))
             
-            # Mark current message as sent
+            # Mark current message as sent (with race condition protection)
             result = self.client.table("scheduled_messages") \
                 .update({
                     "status": "sent",
                     "updated_at": datetime.utcnow().isoformat() + "+00:00"
                 }) \
                 .eq("id", message_id) \
+                .eq("status", "queued") \
                 .execute()
+            
+            if not result.data:
+                logger.warning("skip_send_state_race message_id=%s", message_id)
+                return False
             
             # Schedule next occurrence for recurring messages
             next_scheduled_time = None
@@ -584,23 +589,28 @@ class SupabaseService:
                 # Weekly messages: schedule for next week at same time
                 next_scheduled_time = current_scheduled_for + timedelta(weeks=1)
             
-            # Create next occurrence if this is a recurring message
+            # Create next occurrence if this is a recurring message (with duplicate prevention)
             if next_scheduled_time:
-                next_message_data = {
-                    "subscriber_id": subscriber_id,
-                    "message_type": message_type,
-                    "scheduled_for": next_scheduled_time.isoformat(),
-                    "status": "pending",
-                    "content": ""  # Will be generated when dispatched
-                }
+                next_iso = next_scheduled_time.isoformat()
                 
-                next_result = self.client.table("scheduled_messages").insert(next_message_data).execute()
-                
-                if next_result.data:
-                    next_message_id = next_result.data[0]["id"]
-                    logger.info(f"Message {message_id} sent and next occurrence {next_message_id} scheduled for {next_scheduled_time}")
+                if not self._exists_scheduled_message(subscriber_id, message_type, next_iso):
+                    next_message_data = {
+                        "subscriber_id": subscriber_id,
+                        "message_type": message_type,
+                        "scheduled_for": next_iso,
+                        "status": "pending",
+                        "content": ""  # Will be generated when dispatched
+                    }
+                    
+                    next_result = self.client.table("scheduled_messages").insert(next_message_data).execute()
+                    
+                    if next_result.data:
+                        next_message_id = next_result.data[0]["id"]
+                        logger.info(f"Message {message_id} sent and next occurrence {next_message_id} scheduled for {next_scheduled_time}")
+                    else:
+                        logger.warning(f"Message {message_id} sent but failed to schedule next occurrence")
                 else:
-                    logger.warning(f"Message {message_id} sent but failed to schedule next occurrence")
+                    logger.info("skip_duplicate_next_occurrence message_id=%s type=%s when=%s", message_id, message_type, next_iso)
             else:
                 logger.info(f"Non-recurring message {message_id} marked as sent")
             
@@ -997,6 +1007,21 @@ class SupabaseService:
         except Exception as e:
             logger.error(f"Error populating scheduled messages: {e}")
             return 0
+
+    def _exists_scheduled_message(self, user_id: str, message_type: str, scheduled_iso: str) -> bool:
+        """Check if a scheduled message already exists to prevent duplicates"""
+        try:
+            result = self.client.table("scheduled_messages") \
+                .select("id") \
+                .eq("subscriber_id", user_id) \
+                .eq("message_type", message_type) \
+                .eq("scheduled_for", scheduled_iso) \
+                .in_("status", ["pending", "queued"]) \
+                .limit(1) \
+                .execute()
+            return bool(result.data)
+        except Exception:
+            return False
 
     async def create_immediate_test_messages(self, user_id: str) -> bool:
         """Create immediate test messages for debugging (scheduled 1 minute ago)"""
