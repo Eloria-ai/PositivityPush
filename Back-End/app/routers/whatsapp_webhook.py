@@ -331,6 +331,28 @@ async def handle_coaching_message_with_subscription(
             )
             return
         
+        # Debug command to test scheduled messages (temporary)
+        if message_text.lower().strip() in ["test messages", "create test messages", "debug messages"]:
+            try:
+                success = await supabase_service.create_immediate_test_messages(subscription["id"])
+                if success:
+                    await whatsapp_service.send_message(
+                        wa_id,
+                        "🧪 Created test scheduled messages! They should be processed within 5 minutes by the Celery worker."
+                    )
+                else:
+                    await whatsapp_service.send_message(
+                        wa_id,
+                        "❌ Failed to create test messages. Check the logs for details."
+                    )
+            except Exception as e:
+                logger.error(f"Error creating test messages: {e}")
+                await whatsapp_service.send_message(
+                    wa_id,
+                    "❌ Error creating test messages. Please try again."
+                )
+            return
+        
         # Check if user is in onboarding process
         logger.info(f"Checking onboarding status for user {subscription['id']}")
         try:

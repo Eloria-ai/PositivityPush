@@ -951,3 +951,45 @@ class SupabaseService:
         except Exception as e:
             logger.error(f"Error populating scheduled messages: {e}")
             return 0
+
+    async def create_immediate_test_messages(self, user_id: str) -> bool:
+        """Create immediate test messages for debugging (scheduled 1 minute ago)"""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Create messages that are due immediately
+            now_minus_1min = datetime.utcnow() - timedelta(minutes=1)
+            
+            test_messages = [
+                {
+                    "subscriber_id": user_id,
+                    "message_type": "daily_affirmation", 
+                    "scheduled_for": now_minus_1min.isoformat() + "+00:00",
+                    "status": "pending",
+                    "content": ""
+                },
+                {
+                    "subscriber_id": user_id,
+                    "message_type": "midday_boost",
+                    "scheduled_for": now_minus_1min.isoformat() + "+00:00", 
+                    "status": "pending",
+                    "content": ""
+                },
+                {
+                    "subscriber_id": user_id,
+                    "message_type": "evening_wind_down",
+                    "scheduled_for": now_minus_1min.isoformat() + "+00:00",
+                    "status": "pending", 
+                    "content": ""
+                }
+            ]
+            
+            result = self.client.table("scheduled_messages").insert(test_messages).execute()
+            created_count = len(result.data) if result.data else 0
+            
+            logger.info(f"Created {created_count} immediate test messages for user {user_id}")
+            return created_count > 0
+            
+        except Exception as e:
+            logger.error(f"Error creating immediate test messages: {e}")
+            return False
