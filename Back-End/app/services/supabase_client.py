@@ -481,8 +481,8 @@ class SupabaseService:
             # Join scheduled_messages with subscribers to get full context
             result = self.client.table("scheduled_messages") \
                 .select("""
-                    id, message_type, scheduled_for, status, content,
-                    subscriber:subscribers (
+                    id, message_type, scheduled_for, status, content, subscriber_id,
+                    subscriber:subscribers!scheduled_messages_subscriber_id_fkey (
                         id, email, wa_id, phone_number, plan_type,
                         personal_goals, communication_style, active_challenges,
                         current_timezone, preferences
@@ -493,18 +493,38 @@ class SupabaseService:
             
             if result.data and len(result.data) > 0:
                 message_row = result.data[0]
+                
+                # Handle subscriber data safely (PostgREST can return under different keys)
+                subscriber_data = message_row.get('subscriber') or message_row.get('subscribers')
+                
+                if not subscriber_data:
+                    # Fallback: fetch subscriber directly using FK
+                    subscriber_id = message_row.get('subscriber_id')
+                    if subscriber_id:
+                        logger.info("Fetching subscriber directly for message_id=%s subscriber_id=%s", message_id, subscriber_id)
+                        subscriber_result = self.client.table("subscribers").select(
+                            "id, email, wa_id, phone_number, plan_type, "
+                            "personal_goals, communication_style, active_challenges, "
+                            "current_timezone, preferences"
+                        ).eq("id", subscriber_id).limit(1).execute()
+                        subscriber_data = subscriber_result.data[0] if subscriber_result.data else None
+                
+                if not subscriber_data:
+                    logger.warning("subscriber_context_missing message_id=%s", message_id)
+                    return None
+                
                 return {
                     'id': message_row['id'],
                     'message_type': message_row['message_type'], 
                     'scheduled_for': message_row['scheduled_for'],
                     'status': message_row['status'],
                     'content': message_row.get('content'),  # Include pre-generated content
-                    'subscriber': message_row['subscriber']
+                    'subscriber': subscriber_data
                 }
             return None
             
         except Exception as e:
-            logger.error(f"Error getting message with user context: {e}")
+            logger.error("Error getting message with user context: %s", str(e))
             return None
     
     async def get_scheduled_message_content(self, message_id: str) -> Optional[Dict[str, Any]]:

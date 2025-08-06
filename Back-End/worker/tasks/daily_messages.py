@@ -135,7 +135,7 @@ def dispatch_message(self, message_id: str) -> Dict:
         message_data = asyncio.run(supabase_service.get_message_with_user_context(message_id))
         
         if not message_data:
-            logger.warning("message_not_found", message_id=message_id)
+            logger.warning("message_not_found message_id=%s", message_id)
             return {"status": "not_found", "message_id": message_id}
         
         subscriber = message_data['subscriber']
@@ -153,14 +153,12 @@ def dispatch_message(self, message_id: str) -> Dict:
             content = full_message.get('content') if full_message else None
             
             if content:
-                logger.info("using_pregenerated_content", 
-                           message_id=message_id,
-                           message_type=message_type)
+                logger.info("using_pregenerated_content message_id=%s message_type=%s", 
+                           message_id, message_type)
         
         if not content:
-            logger.error("content_generation_failed", 
-                        message_id=message_id, 
-                        message_type=message_type)
+            logger.error("content_generation_failed message_id=%s message_type=%s", 
+                        message_id, message_type)
             raise Exception(f"Failed to generate {message_type} content")
         
         # Send and log using common pattern
@@ -170,10 +168,8 @@ def dispatch_message(self, message_id: str) -> Dict:
             # Mark message as sent
             asyncio.run(supabase_service.mark_message_sent(message_id))
             
-            logger.info("message_sent_successfully",
-                       message_id=message_id,
-                       message_type=message_type,
-                       user_email=subscriber.get('email'))
+            logger.info("message_sent_successfully message_id=%s message_type=%s user_email=%s",
+                       message_id, message_type, subscriber.get('email'))
             
             return {
                 "status": "sent",
@@ -184,24 +180,20 @@ def dispatch_message(self, message_id: str) -> Dict:
             raise Exception("Message delivery failed")
             
     except Exception as e:
-        logger.error("message_dispatch_failed", 
-                    message_id=message_id, 
-                    error=str(e),
-                    retry_count=self.request.retries)
+        logger.error("message_dispatch_failed message_id=%s error=%s retry_count=%s", 
+                    message_id, str(e), self.request.retries)
         
         # If this is the final retry, mark as failed to prevent infinite requeues
         if self.request.retries >= self.max_retries:
             try:
                 supabase_service, _, _ = get_services()
                 asyncio.run(supabase_service.mark_message_failed(message_id, str(e)))
-                logger.error("message_marked_failed", 
-                            message_id=message_id, 
-                            final_error=str(e))
+                logger.error("message_marked_failed message_id=%s final_error=%s", 
+                            message_id, str(e))
                 return {"status": "failed", "message_id": message_id, "error": str(e)}
             except Exception as mark_error:
-                logger.error("failed_to_mark_failed", 
-                            message_id=message_id, 
-                            mark_error=str(mark_error))
+                logger.error("failed_to_mark_failed message_id=%s mark_error=%s", 
+                            message_id, str(mark_error))
                 return {"status": "failed", "message_id": message_id, "error": f"Final retry failed: {str(e)}"}
         
         # Exponential backoff retry
@@ -238,21 +230,19 @@ async def _generate_content_by_type(
             # Return None to trigger fallback to stored content
             return None
         else:
-            logger.error("unknown_message_type", message_type=message_type)
+            logger.error("unknown_message_type message_type=%s", message_type)
             return None
             
     except Exception as e:
-        logger.error("content_generation_error", 
-                    message_type=message_type, 
-                    user_id=user_id,
-                    error=str(e))
+        logger.error("content_generation_error message_type=%s user_id=%s error=%s", 
+                    message_type, user_id, str(e))
         return None
 
 async def _send_and_log(subscriber: Dict, content: str, message_type: str, 
                        supabase_service: SupabaseService, whatsapp_service: WhatsAppService) -> bool:
     """Common send-and-log pattern to eliminate duplication"""
     if not subscriber.get('wa_id'):
-        logger.warning("no_whatsapp_id", user_email=subscriber.get('email'))
+        logger.warning("no_whatsapp_id user_email=%s", subscriber.get('email'))
         return False
     
     success = await whatsapp_service.send_message(
@@ -268,9 +258,8 @@ async def _send_and_log(subscriber: Dict, content: str, message_type: str,
         )
         return True
     else:
-        logger.error("whatsapp_delivery_failed", 
-                    user_email=subscriber.get('email'),
-                    wa_id=subscriber['wa_id'])
+        logger.error("whatsapp_delivery_failed user_email=%s wa_id=%s", 
+                    subscriber.get('email'), subscriber['wa_id'])
         return False
 
 # ===== LEGACY TASKS (for backward compatibility during transition) =====
@@ -278,51 +267,50 @@ async def _send_and_log(subscriber: Dict, content: str, message_type: str,
 @shared_task(bind=True, max_retries=3)
 def send_daily_accountability_checkin(self, timezone='UTC'):
     """DEPRECATED: Use process_personalized_messages driver instead"""
-    logger.warning("deprecated_task_called", 
-                   task="send_daily_accountability_checkin", 
-                   timezone=timezone)
+    logger.warning("deprecated_task_called task=%s timezone=%s", 
+                   "send_daily_accountability_checkin", timezone)
     return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_morning_affirmations(self, timezone='UTC'):
     """DEPRECATED: Use process_personalized_messages driver instead"""
-    logger.warning("deprecated_task_called", task="send_morning_affirmations", timezone=timezone)
+    logger.warning("deprecated_task_called task=%s timezone=%s", "send_morning_affirmations", timezone)
     return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_evening_gratitude(self, timezone='UTC'):
     """DEPRECATED: Use process_personalized_messages driver instead"""
-    logger.warning("deprecated_task_called", task="send_evening_gratitude", timezone=timezone)
+    logger.warning("deprecated_task_called task=%s timezone=%s", "send_evening_gratitude", timezone)
     return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_weekly_reflection(self, timezone='UTC'):
     """DEPRECATED: Use process_personalized_messages driver instead"""
-    logger.warning("deprecated_task_called", task="send_weekly_reflection", timezone=timezone)
+    logger.warning("deprecated_task_called task=%s timezone=%s", "send_weekly_reflection", timezone)
     return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_day_planning(self, timezone='UTC'):
     """DEPRECATED: Use process_personalized_messages driver instead"""
-    logger.warning("deprecated_task_called", task="send_day_planning", timezone=timezone)
+    logger.warning("deprecated_task_called task=%s timezone=%s", "send_day_planning", timezone)
     return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_midday_affirmation(self, timezone='UTC'):
     """DEPRECATED: Use process_personalized_messages driver instead"""
-    logger.warning("deprecated_task_called", task="send_midday_affirmation", timezone=timezone)
+    logger.warning("deprecated_task_called task=%s timezone=%s", "send_midday_affirmation", timezone)
     return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_evening_affirmation(self, timezone='UTC'):
     """DEPRECATED: Use process_personalized_messages driver instead"""
-    logger.warning("deprecated_task_called", task="send_evening_affirmation", timezone=timezone)
+    logger.warning("deprecated_task_called task=%s timezone=%s", "send_evening_affirmation", timezone)
     return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task(bind=True, max_retries=3)
 def send_weekly_check_ins(self, timezone='UTC'):
     """DEPRECATED: Use process_personalized_messages driver instead"""
-    logger.warning("deprecated_task_called", task="send_weekly_check_ins", timezone=timezone)
+    logger.warning("deprecated_task_called task=%s timezone=%s", "send_weekly_check_ins", timezone)
     return {"status": "deprecated", "message": "Use process_personalized_messages driver instead"}
 
 @shared_task
