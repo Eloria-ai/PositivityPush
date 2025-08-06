@@ -924,9 +924,13 @@ class SupabaseService:
             return datetime.now(pytz.UTC) + timedelta(hours=1)
     
     def _calculate_next_weekly_occurrence(self, today, day_name: str, time_str: str, tz) -> datetime:
-        """Calculate next occurrence of weekly time in user timezone"""
+        """
+        Calculate next occurrence of weekly time in user timezone.
+        If the day is today and target time hasn't passed yet → schedule today.
+        Otherwise → schedule the next week's occurrence.
+        """
         try:
-            # Map day names to weekday numbers (Monday=0, Sunday=6)
+            # Map day names to weekday numbers (Monday=0, Sunday=6) - matches datetime.weekday()
             day_mapping = {
                 "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
                 "friday": 4, "saturday": 5, "sunday": 6
@@ -935,19 +939,23 @@ class SupabaseService:
             target_weekday = day_mapping.get(day_name.lower(), 6)  # Default to Sunday
             current_weekday = today.weekday()
             
-            # Calculate days until target weekday
-            days_ahead = target_weekday - current_weekday
-            if days_ahead <= 0:  # Target day already happened this week
-                days_ahead += 7
-            
-            target_date = today + timedelta(days=days_ahead)
+            # Parse HH:MM (already normalized by _parse_ampm_time)
             hour, minute = map(int, time_str.split(":"))
             
-            # Create datetime for target day at specified time
-            target_time = tz.localize(datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute)))
+            # Compute base days_ahead using modulo arithmetic (0..6)
+            days_ahead = (target_weekday - current_weekday) % 7  # 0 means "today"
+            
+            # Build candidate datetime in user's timezone
+            target_date = today + timedelta(days=days_ahead)
+            candidate_local = tz.localize(datetime.combine(target_date, datetime.min.time().replace(hour=hour, minute=minute)))
+            
+            # If today and time already passed, bump one week (same logic as daily scheduling)
+            now_local = datetime.now(tz)
+            if days_ahead == 0 and candidate_local <= now_local:
+                candidate_local += timedelta(days=7)
             
             # Convert to UTC for database storage
-            return target_time.astimezone(pytz.UTC)
+            return candidate_local.astimezone(pytz.UTC)
             
         except Exception as e:
             logger.error(f"Error calculating weekly occurrence for {day_name} {time_str}: {e}")
