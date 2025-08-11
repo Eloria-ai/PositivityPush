@@ -698,7 +698,11 @@ class SupabaseService:
             
             # Get user data
             preferences = await self.get_user_preferences(user_id)
-            logger.debug(f"User preferences: {preferences}")
+            logger.info(f"📋 User preferences for scheduled message creation (user {user_id}): {preferences}")
+            
+            # Log what preference keys are available for debugging
+            available_keys = list(preferences.keys()) if preferences else []
+            logger.info(f"🔍 Available preference keys: {available_keys}")
             
             # Get subscriber data for fixed affirmation times
             subscriber_result = self.client.table("subscribers") \
@@ -752,51 +756,81 @@ class SupabaseService:
             for msg in fixed_messages:
                 time_str = subscriber.get(msg["time_key"], msg["default_time"])
                 scheduled_time = self._calculate_next_daily_occurrence(today_user, time_str, tz)
-                
-                messages_to_create.append({
-                    "subscriber_id": user_id,
-                    "message_type": msg["message_type"],
-                    "scheduled_for": scheduled_time.isoformat(),
-                    "status": "pending",
-                    "content": ""  # Empty string for AI-generated content
-                })
+                next_iso = scheduled_time.isoformat()
+                if not self._exists_scheduled_message(user_id, msg["message_type"], next_iso):
+                    messages_to_create.append({
+                        "subscriber_id": user_id,
+                        "message_type": msg["message_type"],
+                        "scheduled_for": next_iso,
+                        "status": "pending",
+                        "content": ""
+                    })
             
             # 2. User-Customized Messages (4 messages)
             customized_messages = [
                 {
                     "message_type": "day_planning",
-                    "pref_key": "day_planning"
+                    "pref_key": "day_planning",
+                    "legacy_keys": ["day_planning_time"]
                 },
                 {
                     "message_type": "accountability_checkin",
-                    "pref_key": "accountability_checkin"
+                    "pref_key": "accountability_checkin",
+                    "legacy_keys": ["accountability_time", "accountability_checkin_time"]
                 },
                 {
                     "message_type": "gratitude_prompt",
-                    "pref_key": "evening_gratitude"
+                    "pref_key": "evening_gratitude",
+                    "legacy_keys": ["evening_gratitude_time", "gratitude_time"]
                 }
             ]
             
             for msg in customized_messages:
+                # Try current key format first
                 time_str = preferences.get(msg["pref_key"])
+                
+                # If not found, try legacy key formats for backward compatibility
+                if not time_str:
+                    for legacy_key in msg.get("legacy_keys", []):
+                        time_str = preferences.get(legacy_key)
+                        if time_str:
+                            logger.info(f"Found time using legacy key {legacy_key}: {time_str} for user {user_id}")
+                            break
+                
                 if time_str:
+                    logger.info(f"✅ Found {msg['message_type']} time: {time_str}")
                     # Parse AM/PM format to 24-hour
                     parsed_time = self._parse_ampm_time(time_str)
                     if parsed_time:
                         scheduled_time = self._calculate_next_daily_occurrence(today_user, parsed_time, tz)
-                        messages_to_create.append({
-                            "subscriber_id": user_id,
-                            "message_type": msg["message_type"],
-                            "scheduled_for": scheduled_time.isoformat(),
-                            "status": "pending",
-                            "content": ""
-                        })
+                        next_iso = scheduled_time.isoformat()
+                        if not self._exists_scheduled_message(user_id, msg["message_type"], next_iso):
+                            messages_to_create.append({
+                                "subscriber_id": user_id,
+                                "message_type": msg["message_type"],
+                                "scheduled_for": next_iso,
+                                "status": "pending",
+                                "content": ""
+                            })
+                    else:
+                        logger.warning(f"⚠️ Could not parse time '{time_str}' for {msg['message_type']}")
+                else:
+                    logger.warning(f"❌ No time found for {msg['message_type']} (looked for keys: {[msg['pref_key']] + msg.get('legacy_keys', [])})")
             
             # 3. Weekly Reflection Message
             weekly_reflection = preferences.get("weekly_reflection")
+            
+            # Try legacy key if current key not found
+            if not weekly_reflection:
+                weekly_reflection = preferences.get("weekly_reflection_schedule")
+                if weekly_reflection:
+                    logger.info(f"Found weekly_reflection using legacy key 'weekly_reflection_schedule' for user {user_id}")
+            
             if weekly_reflection and isinstance(weekly_reflection, dict):
                 day_raw = weekly_reflection.get("day", "sunday")
                 time_raw = weekly_reflection.get("time", "11:00 AM")
+                
+                logger.info(f"✅ Found weekly_reflection: day='{day_raw}', time='{time_raw}'")
                 
                 # Normalize day name (handles "wedsday" → "wednesday")
                 day = self._normalize_weekday(day_raw)
@@ -804,16 +838,22 @@ class SupabaseService:
                 
                 if parsed_time:
                     scheduled_time = self._calculate_next_weekly_occurrence(today_user, day, parsed_time, tz)
-                    messages_to_create.append({
-                        "subscriber_id": user_id,
-                        "message_type": "weekly_reflection",
-                        "scheduled_for": scheduled_time.isoformat(),
-                        "status": "pending",
-                        "content": ""
-                    })
-                    logger.info("Created weekly reflection for %s: %s at %s", user_id, day, time_raw)
+                    next_iso = scheduled_time.isoformat()
+                    if not self._exists_scheduled_message(user_id, "weekly_reflection", next_iso):
+                        messages_to_create.append({
+                            "subscriber_id": user_id,
+                            "message_type": "weekly_reflection",
+                            "scheduled_for": next_iso,
+                            "status": "pending",
+                            "content": ""
+                        })
+                        logger.info(f"✅ Created weekly reflection for {user_id}: {day} at {time_raw} (next: {next_iso})")
+                    else:
+                        logger.info(f"🔄 Weekly reflection already exists for {user_id} at {next_iso}")
                 else:
-                    logger.warning("weekly_reflection_invalid_time user_id=%s time=%s", user_id, time_raw)
+                    logger.warning(f"⚠️ Could not parse weekly_reflection time '{time_raw}' for user {user_id}")
+            else:
+                logger.warning(f"❌ No valid weekly_reflection found for user {user_id} (value: {weekly_reflection})")
             
             # Batch insert all scheduled messages
             if messages_to_create:
