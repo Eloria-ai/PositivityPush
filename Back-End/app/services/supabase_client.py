@@ -826,13 +826,34 @@ class SupabaseService:
                 if weekly_reflection:
                     logger.info(f"Found weekly_reflection using legacy key 'weekly_reflection_schedule' for user {user_id}")
             
-            if weekly_reflection and isinstance(weekly_reflection, dict):
-                day_raw = weekly_reflection.get("day", "sunday")
-                time_raw = weekly_reflection.get("time", "11:00 AM")
-                
-                logger.info(f"✅ Found weekly_reflection: day='{day_raw}', time='{time_raw}'")
-                
-                # Normalize day name (handles "wedsday" → "wednesday")
+            # Handle both dict format and legacy string format  
+            day_raw = None
+            time_raw = None
+            
+            if weekly_reflection:
+                if isinstance(weekly_reflection, dict):
+                    # Modern dict format: {"day": "sunday", "time": "11:00 AM"}
+                    day_raw = weekly_reflection.get("day", "sunday")
+                    time_raw = weekly_reflection.get("time", "11:00 AM")
+                    logger.info(f"✅ Found weekly_reflection (dict format): day='{day_raw}', time='{time_raw}'")
+                elif isinstance(weekly_reflection, str):
+                    # Legacy string format: "wednsday 11:16am" or "sunday 10:30am"
+                    logger.info(f"✅ Found weekly_reflection (legacy string format): '{weekly_reflection}'")
+                    parts = weekly_reflection.strip().split(None, 1)  # Split on whitespace, max 2 parts
+                    if len(parts) >= 2:
+                        day_raw = parts[0]
+                        time_raw = parts[1]
+                        logger.info(f"✅ Parsed legacy string: day='{day_raw}', time='{time_raw}'")
+                    elif len(parts) == 1:
+                        # Only day provided in legacy format, use default time
+                        day_raw = parts[0]
+                        time_raw = "11:00 AM"
+                        logger.info(f"✅ Parsed legacy string (day only): day='{day_raw}', using default time='{time_raw}'")
+                    else:
+                        logger.warning(f"⚠️ Could not parse legacy weekly_reflection string: '{weekly_reflection}'")
+            
+            if day_raw and time_raw:
+                # Normalize day name (handles "wednsday" → "wednesday", "thuesday" → "tuesday")
                 day = self._normalize_weekday(day_raw)
                 parsed_time = self._parse_ampm_time(time_raw)
                 
@@ -929,28 +950,83 @@ class SupabaseService:
             return None
     
     def _normalize_weekday(self, s: str) -> str:
-        """Normalize weekday names including common typos and abbreviations"""
-        import difflib
+        """AI-powered weekday normalization that handles any typo or abbreviation"""
+        if not s:
+            return "sunday"  # Default fallback
+            
+        s = s.strip().lower()
         
-        _WEEKDAY_ALIASES = {
-            "mon": "monday", "monday": "monday",
-            "tue": "tuesday", "tues": "tuesday", "tuesday": "tuesday", 
-            "wed": "wednesday", "weds": "wednesday", "wednes": "wednesday", "wednesday": "wednesday",
-            "wednsday": "wednesday", "wendsday": "wednesday", "wedsday": "wednesday",  # common typos
-            "thu": "thursday", "thur": "thursday", "thurs": "thursday", "thursday": "thursday",
-            "fri": "friday", "friday": "friday",
-            "sat": "saturday", "saturday": "saturday",
-            "sun": "sunday", "sunday": "sunday",
+        # Quick exact matches for common cases (performance optimization)
+        _EXACT_MATCHES = {
+            "monday": "monday", "mon": "monday",
+            "tuesday": "tuesday", "tue": "tuesday", "tues": "tuesday", 
+            "wednesday": "wednesday", "wed": "wednesday", "weds": "wednesday",
+            "thursday": "thursday", "thu": "thursday", "thur": "thursday", "thurs": "thursday",
+            "friday": "friday", "fri": "friday",
+            "saturday": "saturday", "sat": "saturday",
+            "sunday": "sunday", "sun": "sunday",
         }
         
-        key = (s or "").strip().lower()
-        if key in _WEEKDAY_ALIASES:
-            return _WEEKDAY_ALIASES[key]
+        if s in _EXACT_MATCHES:
+            return _EXACT_MATCHES[s]
             
-        # Fuzzy fallback for rarer typos
-        _WEEKDAY_CANON = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        match = difflib.get_close_matches(key, _WEEKDAY_CANON, n=1, cutoff=0.6)
-        return match[0] if match else "sunday"  # Default fallback
+        # Use AI for typo detection and correction
+        try:
+            from openai import OpenAI
+            from app.config import settings
+            
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            
+            prompt = f"""
+Given this potentially misspelled weekday: "{s}"
+
+Return ONLY the correct weekday name in lowercase.
+
+Examples:
+- "wednsday" → "wednesday"
+- "thuesday" → "tuesday" 
+- "munday" → "monday"
+- "teusday" → "tuesday"
+- "wendsday" → "wednesday"
+- "thursady" → "thursday"
+- "fryday" → "friday"
+- "saterday" → "saturday"
+- "sundaay" → "sunday"
+
+If it's clearly not a weekday, return "sunday" as default.
+Return ONLY the weekday name, nothing else.
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert at correcting weekday spelling mistakes. Return only the corrected weekday name."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10,
+                temperature=0.1
+            )
+            
+            result = response.choices[0].message.content.strip().lower()
+            
+            # Validate result is a real weekday
+            valid_weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+            if result in valid_weekdays:
+                if result != s:  # Only log if correction was made
+                    logger.info(f"AI corrected weekday: '{s}' → '{result}'")
+                return result
+            else:
+                logger.warning(f"AI returned invalid weekday '{result}' for input '{s}', using 'sunday'")
+                return "sunday"
+                
+        except Exception as e:
+            logger.warning(f"AI weekday normalization failed for '{s}': {e}, using fallback")
+            
+            # Fallback to difflib for offline capability
+            import difflib
+            _WEEKDAY_CANON = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+            match = difflib.get_close_matches(s, _WEEKDAY_CANON, n=1, cutoff=0.6)
+            return match[0] if match else "sunday"
     
     def _calculate_next_daily_occurrence(self, today, time_str: str, tz) -> datetime:
         """Calculate next occurrence of daily time in user timezone"""
