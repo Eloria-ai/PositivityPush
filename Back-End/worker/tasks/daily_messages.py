@@ -67,9 +67,10 @@ def log_error(message, **kwargs):
 def get_services() -> Tuple[SupabaseService, AICoachService, WhatsAppService]:
     """Utility to avoid duplicating service initialization across tasks"""
     db = get_supabase_client()
+    supabase_service = SupabaseService(db)
     return (
-        SupabaseService(db),
-        AICoachService(),
+        supabase_service,
+        AICoachService(supabase_service),  # Pass supabase for pattern tracking
         WhatsAppService()
     )
 

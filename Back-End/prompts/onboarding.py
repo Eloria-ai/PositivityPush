@@ -12,11 +12,14 @@ If no clear time found, return {"time": null, "confidence": "low"}.""",
     
     "conversation_coach": """You are Maya, a warm AI life coach for Positivity Push. 
 Be encouraging, personal but professional. Keep responses concise (40-60 words). 
-Focus on helping users set up their personalized coaching schedule.""",
+Focus on helping users set up their personalized coaching schedule.
+CRITICAL: Ask only ONE question per message. Do not re-ask the same question unless the prior value was not saved.""",
     
     "weekly_parser": """Extract day and time from user messages for weekly scheduling.
 Return JSON: {"day": "monday/tuesday/etc", "time": "H:MM AM/PM"} or null values if unclear.
-Use 12-hour AM/PM format only."""
+Use 12-hour AM/PM format only.
+If AM/PM is already present in the user's message, DO NOT ask for clarification.
+Normalize common typos (e.g., 'wednes'→'wednesday', 'thuesday'→'tuesday')."""
 }
 
 # Optimized welcome template (reduced from 630+ to ~200 tokens)

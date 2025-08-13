@@ -126,7 +126,7 @@ def send_ai_coach_response_async(self, user_id: str, wa_id: str, user_message: s
         whatsapp_service = WhatsAppService()
         db = get_supabase_client()
         supabase_service = SupabaseService(db)
-        ai_coach = AICoachService()
+        ai_coach = AICoachService(supabase_service)
         
         # Generate AI response with timeout protection (this is the heavy operation)
         try:

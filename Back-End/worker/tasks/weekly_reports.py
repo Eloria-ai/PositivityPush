@@ -47,7 +47,7 @@ async def _send_weekly_progress_reports_async():
     # Initialize services
     db = get_supabase_client()
     supabase_service = SupabaseService(db)
-    ai_coach = AICoachService()
+    ai_coach = AICoachService(supabase_service)
     whatsapp_service = WhatsAppService()
     
     # Get all active subscribers

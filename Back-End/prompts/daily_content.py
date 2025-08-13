@@ -7,10 +7,11 @@ DAILY_AFFIRMATION_PROMPT = """
 Create a personalized daily affirmation for this user. Make it:
 
 REQUIREMENTS:
-- Specific to their goals, challenges, or recent conversations
+- Specific to their goals, challenges, or recent conversations (must reference at least one concrete detail)
 - Empowering and actionable (not just "feel good" words)
-- 30-50 words maximum
-- Start with "Today" or "This morning" or their name
+- 15-22 words maximum (one idea only)
+- Vary opening tokens from the last 7 days; do not start with the same 3 words as yesterday
+- Start with "Today" or "This morning" or their name (but do not repeat the same opener more than twice a week)
 - Include one concrete action or mindset they can practice
 
 USER CONTEXT:
@@ -25,18 +26,19 @@ AFFIRMATION STYLE:
 - Focused on growth and action
 - Uses their preferred communication style
 
-Generate a morning affirmation that will genuinely inspire them today.
+Generate a single, concise morning affirmation that will genuinely inspire them today.
 """
 
 GRATITUDE_PROMPT_TEMPLATE = """
 Create an evening gratitude reflection prompt for this user. Make it:
 
 REQUIREMENTS:
-- Connected to their day, experiences, or current focus
-- Specific and meaningful (not generic "what are you grateful for")
-- 25-40 words maximum
-- Encourages deeper reflection
-- Relevant to their recent conversations or goals
+- Connected to their day, experiences, or current focus (must reference at least one concrete detail)
+- 22-38 words maximum
+- Encourages deeper reflection without requiring a typed reply
+- Include one concrete noticing cue (sound, sensation, a person)
+- No exclamation marks; one question max
+- Vary opener from last 7 days
 
 USER CONTEXT:
 {user_context}
@@ -56,11 +58,11 @@ Create a gratitude prompt that will help them end their day with appreciation an
 WEEKLY_REFLECTION_PROMPT = """
 Create a personalized weekly reflection for this user. Include:
 
-STRUCTURE:
-1. Acknowledgment of their week and any specific events mentioned
-2. One meaningful question about their progress or experiences
-3. One insight or encouragement based on their journey
-4. A forward-looking element for the coming week
+STRUCTURE (80–120 words total):
+1. Acknowledge their week with one concrete callback (win, challenge, person, or event) from memory
+2. Ask one meaningful question about their progress or experiences (one question max)
+3. Offer one insight or encouragement based on their journey
+4. Close with a forward-looking micro-step they can do in ≤2 minutes next week
 
 USER CONTEXT:
 {user_context}
@@ -72,8 +74,8 @@ REFLECTION STYLE:
 - Warm and celebratory of progress made
 - Honest about challenges without being negative
 - Helps them see patterns and growth
-- 100-150 words total
-- Ends with gentle encouragement for the week ahead
+- Natural, not scripted
+- If insufficient week data, say: "Since we’re just getting started…" and shift to planning
 
 Create a reflection that helps them appreciate their journey and feel motivated for what's next.
 """

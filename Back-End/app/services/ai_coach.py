@@ -15,6 +15,7 @@ from app.services.psychological_framework import PsychologicalFramework, Psychol
 from app.services.enhanced_prompts import EnhancedPromptEngine
 from app.services.specialized_coaches import CoachType
 from app.services.core_personality import core_personality, ConversationContext
+from app.services.pattern_tracker import PatternTracker
 
 # Configure structured logging
 logger = get_logger("app.services.ai_coach")
@@ -22,11 +23,12 @@ logger = get_logger("app.services.ai_coach")
 class AICoachService:
     """Enhanced AI Coach with psychological framework integration"""
     
-    def __init__(self):
+    def __init__(self, supabase_service=None):
         self.openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
         self.mem0_service = Mem0Service()
         self.psychological_framework = PsychologicalFramework()
         self.prompt_engine = EnhancedPromptEngine()
+        self.pattern_tracker = PatternTracker(supabase_service) if supabase_service else None
         self.model = settings.OPENAI_MODEL
     
     async def generate_welcome_message(self, subscription: Dict[str, Any]) -> str:
@@ -209,14 +211,20 @@ class AICoachService:
             if user_memories:
                 recent_context = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
             
-            # System prompt based on specifications
+            # Get anti-repetition instructions
+            variety_addon = ""
+            if self.pattern_tracker:
+                variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'daily_affirmation')
+            
+            # System prompt based on specifications with variety enforcement
             system_prompt = f"""You are a friendly Morning Affirmation Coach.
 
 CORE RULES:
-• Send exactly ONE short affirmation (1-2 lines max, ~20 words)
+• Send exactly ONE short affirmation (15-22 words max)
+• Must reference at least one concrete detail from recent conversations or user goals
 • Match user's pronoun preference (first-person "I..." or second-person "You...")
 • Use recent context: wins, challenges, emotions from conversations
-• Keep language simple, uplifting, under 20 words
+• Keep language simple, uplifting
 • Avoid clichés; vary vocabulary and structure daily
 • Rotate themes: confidence, gratitude, resilience, focus, optimism, kindness, growth
 • Never bundle multiple affirmations; one powerful idea only
@@ -224,7 +232,7 @@ CORE RULES:
 USER CONTEXT:
 - Recent conversations: {recent_context[:300] if recent_context else 'New user starting their journey'}
 - Goals: {user_context.get('personal_goals', 'personal growth')}
-- Plan: {user_context.get('plan_type', '3_month')} subscription
+- Plan: {user_context.get('plan_type', '3_month')} subscription{variety_addon}
 
 Generate a single, concise morning affirmation that feels personal and resonates with their current situation."""
             
@@ -235,10 +243,16 @@ Generate a single, concise morning affirmation that feels personal and resonates
                     {"role": "user", "content": "Generate today's personalized morning affirmation"}
                 ],
                 max_tokens=50,  # Reduced for conciseness
-                temperature=0.8
+                temperature=0.8,
+                frequency_penalty=0.3,  # Reduce repetitive tokens
+                presence_penalty=0.2    # Encourage topic diversity
             )
             
             affirmation = response.choices[0].message.content.strip()
+            
+            # Store pattern for future anti-repetition
+            if self.pattern_tracker:
+                await self.pattern_tracker.store_pattern(user_id, 'daily_affirmation', affirmation)
             
             # Store in mem0
             affirmation_messages = [
@@ -283,15 +297,20 @@ Generate a single, concise morning affirmation that feels personal and resonates
                 # Look for wins, people, comforts, challenges from today
                 day_context = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
             
-            # System prompt based on specifications
+            # Get anti-repetition instructions
+            variety_addon = ""
+            if self.pattern_tracker:
+                variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'gratitude_prompt')
+            
+            # System prompt based on specifications with variety enforcement
             system_prompt = f"""You are a soothing Night-Gratitude Coach.
 
 CORE RULES:
-• Send exactly ONE gentle gratitude prompt (1-3 softly-flowing sentences, ≤40 words total)
-• Tailor to wins, people, comforts, challenges gathered during the day
-• Tone = quiet, warm, sleep-friendly. No exclamation marks unless user prefers high energy
-• Encourage reflection; do NOT ask for typed reply (unless user likes journaling)
-• Vary phrasing nightly; avoid repeating opener within 7 days
+• Send exactly ONE gentle gratitude prompt (22-38 words max)
+• Must reference at least one concrete detail from day's experiences or user context
+• Include one concrete noticing cue (sound, sensation, a person)
+• Tone = quiet, warm, sleep-friendly. No exclamation marks; one question max
+• Vary opener from last 7 days; avoid repeating sentence structure
 • Rotate themes: simple joys, supportive people, lessons learned, personal growth, physical comforts, hopes for tomorrow
 • End with calm cadence—no action items, no second question
 
@@ -304,7 +323,7 @@ GRATITUDE THEMES:
 USER CONTEXT:
 - Day's experiences: {day_context[:200] if day_context else 'New user ending their day peacefully'}
 - Goals: {user_context.get('personal_goals', 'personal growth')}
-- Tone preference: {user_context.get('communication_style', 'warm and gentle')}
+- Tone preference: {user_context.get('communication_style', 'warm and gentle')}{variety_addon}
 
 Generate a single, gentle gratitude prompt that invites peaceful reflection without requiring a response."""
             
@@ -315,10 +334,16 @@ Generate a single, gentle gratitude prompt that invites peaceful reflection with
                     {"role": "user", "content": "Generate tonight's gratitude prompt"}
                 ],
                 max_tokens=70,  # For gentle, flowing sentences
-                temperature=0.8
+                temperature=0.8,
+                frequency_penalty=0.3,  # Reduce repetitive tokens
+                presence_penalty=0.2    # Encourage topic diversity
             )
             
             prompt = response.choices[0].message.content.strip()
+            
+            # Store pattern for future anti-repetition
+            if self.pattern_tracker:
+                await self.pattern_tracker.store_pattern(user_id, 'gratitude_prompt', prompt)
             
             # Store in mem0
             gratitude_messages = [
@@ -539,28 +564,51 @@ Generate ONLY the first step: a gentle check-in that recaps their morning plan a
             if has_past_week_data and user_memories:
                 past_week_context = " ".join([mem.get('memory', '') for mem in user_memories[:5]])
             
-            # System prompt based on specifications
-            system_prompt = f"""You are a warm, supportive Weekly Reflection & Planning Coach.
+            # Get anti-repetition instructions
+            variety_addon = ""
+            if self.pattern_tracker:
+                variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'weekly_reflection')
+            
+            # Enhanced system prompt based on updated specifications
+            if has_past_week_data:
+                # Returning user - use structured weekly reflection format
+                system_prompt = f"""You are a warm Weekly Reflection Coach.
+
+STRUCTURE (80–120 words total):
+1. Acknowledge their week with one concrete callback (win, challenge, person, or event) from memory
+2. Ask one meaningful question about their progress or experiences (one question max)
+3. Offer one insight or encouragement based on their journey  
+4. Close with a forward-looking micro-step they can do in ≤2 minutes next week
 
 CORE RULES:
-• One prompt at a time - wait for user's reply before continuing
-• Keep tone encouraging and non-judgmental
-• Celebrate effort; normalize unfinished tasks
-• Dynamically craft questions to match user's context and history
-• Keep wording natural, not scripted
-
-USER STATUS: {'First-time user' if not has_past_week_data else 'Returning user with past week data'}
-
-{'FIRST-TIME USER FLOW - Skip reflection, start with planning:' if not has_past_week_data else 'RETURNING USER FLOW - Start with reflection:'}
-{'• Invite user to share what they want to accomplish in their very first week' if not has_past_week_data else '• Greet and cue reflection (mention last week goals if available)'}
-{'• Ask for one key habit/action they want to focus on' if not has_past_week_data else '• Ask what was accomplished and what they are proud of'}
+• Warm and celebratory of progress made
+• Honest about challenges without being negative
+• Helps them see patterns and growth
+• Natural, not scripted
 
 USER CONTEXT:
-- Past week data: {past_week_context[:300] if past_week_context else 'No past week interactions available'}
-- Goals: {user_context.get('personal_goals', 'personal growth and reflection')}
-- Plan: {user_context.get('plan_type', '3_month')} subscription
+- Week's conversations: {past_week_context[:300]}
+- Goals: {user_context.get('personal_goals', 'personal growth')}
+- Plan: {user_context.get('plan_type', '3_month')} subscription{variety_addon}
 
-Generate the appropriate opening prompt based on whether this is their first weekly session or returning session."""
+Create a reflection that helps them appreciate their journey and feel motivated for what's next."""
+            else:
+                # First-time user - planning focused
+                system_prompt = f"""You are a warm Weekly Planning Coach for new users.
+
+FIRST-TIME USER APPROACH:
+• Since we're just getting started, focus on planning rather than reflection
+• Invite them to share what they want to accomplish in their very first week
+• Ask for one key habit or action they want to focus on
+• Keep encouraging and forward-looking (80–120 words total)
+• One question max
+
+USER CONTEXT:
+- Status: First weekly session
+- Goals: {user_context.get('personal_goals', 'personal growth')}
+- Plan: {user_context.get('plan_type', '3_month')} subscription{variety_addon}
+
+Generate an encouraging first-week planning prompt that helps them set intentions."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
@@ -568,11 +616,17 @@ Generate the appropriate opening prompt based on whether this is their first wee
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Generate {'first-time' if not has_past_week_data else 'returning'} user weekly reflection opening"}
                 ],
-                max_tokens=100,  # For dynamic, personalized prompts
-                temperature=0.8
+                max_tokens=150,  # For structured 80-120 word reflections
+                temperature=0.8,
+                frequency_penalty=0.3,  # Reduce repetitive tokens
+                presence_penalty=0.2    # Encourage topic diversity
             )
             
             reflection = response.choices[0].message.content.strip()
+            
+            # Store pattern for future anti-repetition
+            if self.pattern_tracker:
+                await self.pattern_tracker.store_pattern(user_id, 'weekly_reflection', reflection)
             
             # Store in mem0
             await self.mem0_service.add_memory(
@@ -683,14 +737,20 @@ Generate a single, engaging day planning prompt that motivates them to list thei
                 # Look for morning planning or recent interactions
                 morning_context = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
             
-            # System prompt based on specifications
+            # Get anti-repetition instructions
+            variety_addon = ""
+            if self.pattern_tracker:
+                variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'midday_affirmation')
+            
+            # System prompt based on specifications with variety enforcement
             system_prompt = f"""You are an encouraging Mid-Day Affirmation Coach.
 
 CORE RULES:
-• Send exactly ONE short affirmation (1-2 lines max, ~20 words)
+• Send exactly ONE short affirmation (15-22 words max)
+• Must reference at least one concrete detail from morning context or user goals
 • Match user's pronoun preference ("I..." or "You..." format)
 • Tailor to morning goals, current energy level, or obstacles from today
-• Keep language simple, upbeat, under 20 words
+• Keep language simple, upbeat
 • Vary themes: progress, focus, calm, resilience, gratitude, optimism
 • Rotate vocabulary - no direct repeat within 7 days
 • Never bundle multiple affirmations; one clear idea per message
@@ -704,7 +764,7 @@ MIDDAY THEMES:
 USER CONTEXT:
 - Morning context: {morning_context[:200] if morning_context else 'New user continuing their day'}
 - Goals: {user_context.get('personal_goals', 'personal growth')}
-- Energy level: Mid-day refresh needed
+- Energy level: Mid-day refresh needed{variety_addon}
 
 Generate a single, energizing midday affirmation that acknowledges progress and renews motivation."""
             
@@ -715,10 +775,16 @@ Generate a single, energizing midday affirmation that acknowledges progress and 
                     {"role": "user", "content": "Generate today's midday affirmation"}
                 ],
                 max_tokens=50,  # Reduced for conciseness
-                temperature=0.8
+                temperature=0.8,
+                frequency_penalty=0.3,  # Reduce repetitive tokens
+                presence_penalty=0.2    # Encourage topic diversity
             )
             
             affirmation = response.choices[0].message.content.strip()
+            
+            # Store pattern for future anti-repetition
+            if self.pattern_tracker:
+                await self.pattern_tracker.store_pattern(user_id, 'midday_affirmation', affirmation)
             
             # Store in mem0
             await self.mem0_service.add_memory(
@@ -748,6 +814,11 @@ Generate a single, energizing midday affirmation that acknowledges progress and 
     async def generate_evening_affirmation(self, user_id: str, user_context: Dict[str, Any]) -> str:
         """Generate personalized evening affirmation following system prompt specifications"""
         try:
+            # Get anti-repetition instructions
+            variety_addon = ""
+            if self.pattern_tracker:
+                variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'evening_affirmation')
+            
             user_memories = await self.mem0_service.get_memories(user_id)
             
             # Get day's context for evening reflection
@@ -779,7 +850,7 @@ USER CONTEXT:
 - Goals: {user_context.get('personal_goals', 'personal growth')}
 - Current mood: Preparing for rest and reflection
 
-Generate a single, soothing evening affirmation that helps them release today and welcome peaceful rest."""
+Generate a single, soothing evening affirmation that helps them release today and welcome peaceful rest.{variety_addon}"""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
@@ -788,10 +859,16 @@ Generate a single, soothing evening affirmation that helps them release today an
                     {"role": "user", "content": "Generate tonight's evening affirmation"}
                 ],
                 max_tokens=50,  # Reduced for conciseness
-                temperature=0.8
+                temperature=0.8,
+                frequency_penalty=0.3,  # Reduce repetition
+                presence_penalty=0.2    # Encourage new content
             )
             
             affirmation = response.choices[0].message.content.strip()
+            
+            # Store pattern for anti-repetition
+            if self.pattern_tracker:
+                await self.pattern_tracker.store_pattern(user_id, 'evening_affirmation', affirmation)
             
             # Store in mem0
             await self.mem0_service.add_memory(

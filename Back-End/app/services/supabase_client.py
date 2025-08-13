@@ -219,16 +219,19 @@ class SupabaseService:
         subscriber_id: str, 
         content: str, 
         message_type: str, 
-        wa_message_id: Optional[str] = None
+        wa_message_id: Optional[str] = None,
+        context_used: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Log conversation message"""
+        """Log conversation message with optional metadata in context_used"""
         try:
+            import json
             from datetime import datetime
             conversation_data = {
                 "subscriber_id": subscriber_id,
                 "content": content,
-                "message_type": message_type,  # 'user' or 'assistant'
+                "message_type": message_type,  # 'user', 'assistant', or 'pattern'
                 "wa_message_id": wa_message_id,
+                "context_used": json.dumps(context_used) if context_used else None,
                 "timestamp": datetime.utcnow().isoformat() + "+00:00"
             }
             
