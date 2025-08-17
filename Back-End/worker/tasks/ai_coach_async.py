@@ -83,14 +83,55 @@ def create_dedupe_key(user_id: str, message_content: str) -> str:
     return f"ai_coach:{user_id}:{message_hash}"
 
 async def send_message_once(whatsapp_service, wa_id: str, message: str, dedupe_key: str = None) -> bool:
-    """Send message with Redis-based idempotency guard (TEMPORARILY DISABLED)"""
+    """Send message with Redis-based idempotency guard"""
+    import os
+    
+    # Check if deduplication is enabled via environment variable
+    deduplication_enabled = os.getenv("DEDUPLICATION_ENABLED", "false").lower() == "true"
+    ttl_seconds = int(os.getenv("DEDUP_TTL_SECONDS", "60"))
+    
     redis = get_redis_client()
     
-    # TEMPORARILY DISABLE DEDUPLICATION FOR DEBUGGING (same as onboarding)
-    log_info("redis_deduplication_disabled_for_debugging", 
-             wa_id=wa_id, 
-             dedupe_key=dedupe_key)
-    return await whatsapp_service.send_message(wa_id, message)
+    # Skip deduplication if disabled, no Redis, or no dedupe key
+    if not deduplication_enabled or not redis or not dedupe_key:
+        if not deduplication_enabled:
+            log_info("redis_deduplication_disabled_by_config", wa_id=wa_id, dedupe_key=dedupe_key)
+        elif not redis:
+            log_info("redis_deduplication_unavailable", wa_id=wa_id, dedupe_key=dedupe_key)
+        return await whatsapp_service.send_message(wa_id, message)
+    
+    # Check for existing message in Redis cache
+    try:
+        if redis.exists(dedupe_key):
+            log_warning("duplicate_message_suppressed", 
+                       wa_id=wa_id, 
+                       dedupe_key=dedupe_key,
+                       ttl_seconds=ttl_seconds)
+            return True
+    except Exception as redis_error:
+        log_warning("redis_dedup_check_failed", 
+                   error=str(redis_error),
+                   wa_id=wa_id,
+                   dedupe_key=dedupe_key)
+        # Continue with sending if Redis check fails
+    
+    # Send the message
+    success = await whatsapp_service.send_message(wa_id, message)
+    
+    # Cache successful send in Redis
+    if success:
+        try:
+            redis.setex(dedupe_key, ttl_seconds, "sent")
+            log_info("message_dedupe_cached", 
+                    dedupe_key=dedupe_key,
+                    ttl_seconds=ttl_seconds)
+        except Exception as redis_error:
+            log_warning("redis_dedup_cache_failed",
+                       error=str(redis_error),
+                       dedupe_key=dedupe_key)
+            # Don't fail the overall operation if caching fails
+    
+    return success
 
 @current_app.task(bind=True, max_retries=3, default_retry_delay=30)
 def send_ai_coach_response_async(self, user_id: str, wa_id: str, user_message: str, user_context: Dict[str, Any], message_sid: str, correlation_id: str = None):
