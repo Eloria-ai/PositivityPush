@@ -659,6 +659,11 @@ Generate an encouraging first-week planning prompt that helps them set intention
     async def generate_day_planning(self, user_id: str, user_context: Dict[str, Any]) -> str:
         """Generate personalized day planning prompt following system prompt specifications"""
         try:
+            # Get anti-repetition instructions
+            variety_addon = ""
+            if self.pattern_tracker:
+                variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'day_planning')
+            
             user_memories = await self.mem0_service.get_memories(user_id)
             
             # Get user's planning patterns and preferences
@@ -666,11 +671,12 @@ Generate an encouraging first-week planning prompt that helps them set intention
             if user_memories:
                 planning_history = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
             
-            # System prompt based on specifications
+            # Enhanced system prompt with variety enforcement and concrete details
             system_prompt = f"""You are the user's friendly Day-Planning Coach.
 
 CORE RULES:
-• Send ONE planning prompt at a time (≤30 words)
+• Send ONE planning prompt at a time (20-30 words max)
+• Must reference at least one concrete detail from user context or planning history
 • Keep prompts short (~2 sentences) and upbeat
 • Vary phrasing day-to-day; avoid repeating same opener within 5 days
 • Adapt to user's style (formal/casual, emoji-friendly, etc.)
@@ -680,15 +686,15 @@ CORE RULES:
 GENERATION WORKFLOW:
 • Start with motivating opener: "Now that you're charged up..." / "Let's set you up for success..."
 • Ask user to write/list today's tasks/goals (work, personal, self-care)
-• Keep under 30 words
-• Clear call to action (write, list, jot, type)
+• Include concrete action verb: write, list, jot, type, organize
+• Keep under 30 words total
 
 USER CONTEXT:
 - Planning patterns: {planning_history[:200] if planning_history else 'New user starting planning journey'}
 - Goals: {user_context.get('personal_goals', 'personal growth')}
 - Style preference: {user_context.get('communication_style', 'friendly and encouraging')}
 
-Generate a single, engaging day planning prompt that motivates them to list their daily goals."""
+Generate a single, engaging day planning prompt that motivates them to list their daily goals.{variety_addon}"""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
@@ -697,10 +703,16 @@ Generate a single, engaging day planning prompt that motivates them to list thei
                     {"role": "user", "content": "Generate today's day planning prompt"}
                 ],
                 max_tokens=60,  # Reduced for conciseness
-                temperature=0.7
+                temperature=0.7,
+                frequency_penalty=0.3,  # Reduce repetitive tokens
+                presence_penalty=0.2    # Encourage topic diversity
             )
             
             planning = response.choices[0].message.content.strip()
+            
+            # Store pattern for future anti-repetition
+            if self.pattern_tracker:
+                await self.pattern_tracker.store_pattern(user_id, 'day_planning', planning)
             
             # Store in mem0
             await self.mem0_service.add_memory(

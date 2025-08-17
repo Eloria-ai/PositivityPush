@@ -35,8 +35,8 @@ class PatternTracker:
             'weekly_reflection': True,
             'midday_affirmation': True,
             'evening_affirmation': True,
-            'accountability_checkin': False,  # Start with core types only
-            'day_planning': False
+            'day_planning': True,  # Now enabled for improved planning messages
+            'accountability_checkin': False  # Start with core types only
         }
     
     def extract_pattern(self, message: str) -> MessagePattern:
@@ -196,6 +196,8 @@ class PatternTracker:
             instructions.append("• ROTATE themes: energy → focus → motivation → strength → balance")
         elif message_type == 'evening_affirmation':
             instructions.append("• ROTATE themes: self-forgiveness → gratitude → peace → progress → hope")
+        elif message_type == 'day_planning':
+            instructions.append("• ROTATE openers: Now that → Let's → Ready to → Time to → Today you'll")
         
         return "\n".join(instructions)
     
