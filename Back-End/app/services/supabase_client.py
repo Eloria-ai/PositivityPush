@@ -769,22 +769,25 @@ class SupabaseService:
                         "content": ""
                     })
             
-            # 2. User-Customized Messages (4 messages)
+            # 2. User-Customized Messages (4 messages with staggered timing)
             customized_messages = [
                 {
                     "message_type": "day_planning",
                     "pref_key": "day_planning",
-                    "legacy_keys": ["day_planning_time"]
+                    "legacy_keys": ["day_planning_time"],
+                    "stagger_minutes": 0  # Send at exact user time
                 },
                 {
                     "message_type": "accountability_checkin",
-                    "pref_key": "accountability_checkin",
-                    "legacy_keys": ["accountability_time", "accountability_checkin_time"]
+                    "pref_key": "accountability_checkin", 
+                    "legacy_keys": ["accountability_time", "accountability_checkin_time"],
+                    "stagger_minutes": 2  # Send 2 minutes after user time
                 },
                 {
                     "message_type": "gratitude_prompt",
                     "pref_key": "evening_gratitude",
-                    "legacy_keys": ["evening_gratitude_time", "gratitude_time"]
+                    "legacy_keys": ["evening_gratitude_time", "gratitude_time"],
+                    "stagger_minutes": 4  # Send 4 minutes after user time
                 }
             ]
             
@@ -806,6 +809,13 @@ class SupabaseService:
                     parsed_time = self._parse_ampm_time(time_str)
                     if parsed_time:
                         scheduled_time = self._calculate_next_daily_occurrence(today_user, parsed_time, tz)
+                        
+                        # Apply staggering to reduce simultaneous message bursts
+                        stagger_minutes = msg.get("stagger_minutes", 0)
+                        if stagger_minutes > 0:
+                            scheduled_time = scheduled_time + timedelta(minutes=stagger_minutes)
+                            logger.debug(f"Applied {stagger_minutes}min stagger to {msg['message_type']}")
+                        
                         next_iso = scheduled_time.isoformat()
                         if not self._exists_scheduled_message(user_id, msg["message_type"], next_iso):
                             messages_to_create.append({
@@ -884,17 +894,25 @@ class SupabaseService:
                 logger.info(f"📝 Creating {len(messages_to_create)} scheduled messages")
                 logger.debug(f"Messages to create: {[msg['message_type'] for msg in messages_to_create]}")
                 
-                result = self.client.table("scheduled_messages") \
-                    .insert(messages_to_create) \
-                    .execute()
-                
-                created_count = len(result.data) if result.data else 0
-                if created_count == len(messages_to_create):
+                try:
+                    result = self.client.table("scheduled_messages") \
+                        .insert(messages_to_create) \
+                        .execute()
+                    
+                    created_count = len(result.data) if result.data else 0
                     logger.info(f"✅ Successfully created {created_count} scheduled messages for user {user_id}")
                     return True
-                else:
-                    logger.error(f"❌ Expected {len(messages_to_create)} messages but only created {created_count} for user {user_id}")
-                    return False
+                    
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    if "unique" in error_msg or "duplicate" in error_msg or "constraint" in error_msg:
+                        # Database unique constraint caught duplicates - this is expected and safe
+                        logger.info(f"🔒 Duplicate messages prevented by database constraint for user {user_id}")
+                        return True  # Consider this success - duplicates were properly prevented
+                    else:
+                        # Real error - log and fail
+                        logger.error(f"❌ Failed to create scheduled messages for user {user_id}: {e}")
+                        return False
             else:
                 logger.warning(f"⚠️ No scheduled messages created for user {user_id} - missing preferences")
                 logger.debug(f"Preferences available: {list(preferences.keys())}")
