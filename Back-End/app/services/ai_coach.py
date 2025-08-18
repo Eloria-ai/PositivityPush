@@ -216,13 +216,17 @@ class AICoachService:
             if self.pattern_tracker:
                 variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'daily_affirmation')
             
-            # System prompt based on specifications with variety enforcement
+            # Extract user personalization preferences
+            personalization = self._extract_user_personalization(user_context)
+            
+            # Enhanced system prompt with personalization
             system_prompt = f"""You are a friendly Morning Affirmation Coach.
 
 CORE RULES:
 • Send exactly ONE short affirmation (15-22 words max)
 • Must reference at least one concrete detail from recent conversations or user goals
-• Match user's pronoun preference (first-person "I..." or second-person "You...")
+• {personalization['pronoun_instruction']}
+• Tone: {personalization['tone_preference']}
 • Use recent context: wins, challenges, emotions from conversations
 • Keep language simple, uplifting
 • Avoid clichés; vary vocabulary and structure daily
@@ -232,6 +236,7 @@ CORE RULES:
 USER CONTEXT:
 - Recent conversations: {recent_context[:300] if recent_context else 'New user starting their journey'}
 - Goals: {user_context.get('personal_goals', 'personal growth')}
+- Communication style: {personalization['tone_preference']}
 - Plan: {user_context.get('plan_type', '3_month')} subscription{variety_addon}
 
 Generate a single, concise morning affirmation that feels personal and resonates with their current situation."""
@@ -249,6 +254,9 @@ Generate a single, concise morning affirmation that feels personal and resonates
             )
             
             affirmation = response.choices[0].message.content.strip()
+            
+            # Enforce word count limits (15-22 words)
+            affirmation = self._enforce_word_limits(affirmation, 15, 22, 'daily_affirmation')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -341,6 +349,9 @@ Generate a single, gentle gratitude prompt that invites peaceful reflection with
             
             prompt = response.choices[0].message.content.strip()
             
+            # Enforce word count limits (22-38 words)
+            prompt = self._enforce_word_limits(prompt, 22, 38, 'gratitude_prompt')
+            
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
                 await self.pattern_tracker.store_pattern(user_id, 'gratitude_prompt', prompt)
@@ -376,6 +387,11 @@ Generate a single, gentle gratitude prompt that invites peaceful reflection with
     async def generate_accountability_checkin(self, user_id: str, user_context: Dict[str, Any]) -> str:
         """Generate personalized accountability check-in following 4-step interactive flow"""
         try:
+            # Get anti-repetition instructions
+            variety_addon = ""
+            if self.pattern_tracker:
+                variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'accountability_checkin')
+            
             # Get user's memories for personalization
             user_memories = await self.mem0_service.get_memories(user_id)
             
@@ -388,12 +404,17 @@ Generate a single, gentle gratitude prompt that invites peaceful reflection with
                         morning_plan = mem.get('memory', '')[:200]
                         break
             
-            # System prompt based on 4-step specifications
+            # Extract user personalization preferences
+            personalization = self._extract_user_personalization(user_context)
+            
+            # Enhanced system prompt with personalization and anti-repetition
             system_prompt = f"""You are a gentle, motivating Accountability Coach.
 
 CORE RULES:
 • Use 4-step structure: Check-In → Celebrate → Reflect → Encourage
 • Ask ONE question at a time (≤30 words each)
+• {personalization['pronoun_instruction']}
+• Tone: {personalization['tone_preference']}
 • Reference user's morning to-do list for personal connection
 • Vary wording nightly; treat examples as inspiration, not scripts
 • Keep tone supportive, non-judgmental
@@ -409,7 +430,8 @@ STEP 4 - Encouragement: Reinforce that showing up matters, invite small adjustme
 USER CONTEXT:
 - Morning plan: {morning_plan if morning_plan else 'General goals and intentions'}
 - Goals: {user_context.get('personal_goals', 'personal growth')}
-- Recent context: {user_memories[0].get('memory', 'New user') if user_memories else 'New user'}
+- Communication style: {personalization['tone_preference']}
+- Recent context: {user_memories[0].get('memory', 'New user') if user_memories else 'New user'}{variety_addon}
 
 Generate ONLY the first step: a gentle check-in that recaps their morning plan and asks about completion."""
             
@@ -420,10 +442,16 @@ Generate ONLY the first step: a gentle check-in that recaps their morning plan a
                     {"role": "user", "content": "Generate the first step: gentle check-in and recap of today's goals"}
                 ],
                 max_tokens=80,  # Reduced for conciseness
-                temperature=0.7
+                temperature=0.7,
+                frequency_penalty=0.3,  # Reduce repetitive tokens
+                presence_penalty=0.2    # Encourage topic diversity
             )
             
             checkin_message = response.choices[0].message.content.strip()
+            
+            # Store pattern for future anti-repetition
+            if self.pattern_tracker:
+                await self.pattern_tracker.store_pattern(user_id, 'accountability_checkin', checkin_message)
             
             # Store in mem0
             checkin_messages = [
@@ -514,6 +542,71 @@ Generate ONLY the first step: a gentle check-in that recaps their morning plan a
                           user_id=user_id,
                           error=str(e))
             return []  # Return empty list to continue processing
+    
+    def _extract_user_personalization(self, user_context: Dict[str, Any]) -> Dict[str, str]:
+        """Extract pronoun style and tone preferences from user context"""
+        # Extract communication style and parse for pronoun preference
+        comm_style = user_context.get('communication_style', 'warm and gentle')
+        
+        # Determine pronoun style from context or default to first-person
+        pronoun_style = "first-person"  # Default: "I..." 
+        if any(indicator in str(comm_style).lower() for indicator in ['you', 'direct', 'second']):
+            pronoun_style = "second-person"  # "You..."
+        
+        # Map to clear prompt language
+        pronoun_instruction = {
+            'first-person': 'Use first-person format: "I am..." / "I will..." / "I can..."',
+            'second-person': 'Use second-person format: "You are..." / "You will..." / "You can..."'
+        }.get(pronoun_style, 'Use first-person format: "I am..." / "I will..." / "I can..."')
+        
+        # Extract tone preference
+        tone_preference = comm_style if comm_style else "warm and encouraging"
+        
+        return {
+            'pronoun_instruction': pronoun_instruction,
+            'tone_preference': tone_preference,
+            'pronoun_style': pronoun_style
+        }
+    
+    def _enforce_word_limits(self, text: str, min_words: int, max_words: int, message_type: str = "") -> str:
+        """Enforce word count limits on generated text"""
+        if not text:
+            return text
+            
+        words = text.strip().split()
+        word_count = len(words)
+        
+        # If within limits, return as-is
+        if min_words <= word_count <= max_words:
+            return text
+        
+        # If too long, trim intelligently
+        if word_count > max_words:
+            # Try to cut at sentence boundary first
+            sentences = text.split('.')
+            if len(sentences) > 1:
+                # Keep sentences until we're under limit
+                result = ""
+                for sentence in sentences:
+                    potential = (result + sentence + ".").strip()
+                    if len(potential.split()) <= max_words:
+                        result = potential
+                    else:
+                        break
+                if result:
+                    logger.info(f"Word limit enforced for {message_type}: {word_count} → {len(result.split())} words (sentence boundary)")
+                    return result
+            
+            # Fallback: hard truncate
+            truncated = " ".join(words[:max_words])
+            logger.info(f"Word limit enforced for {message_type}: {word_count} → {max_words} words (truncated)")
+            return truncated
+        
+        # If too short, leave as-is (don't pad artificially)
+        if word_count < min_words:
+            logger.debug(f"Message under minimum for {message_type}: {word_count} words (min: {min_words})")
+        
+        return text
     
     def _get_fallback_response(self, message: str) -> str:
         """Generate contextual fallback response using personality system"""
@@ -624,6 +717,9 @@ Generate an encouraging first-week planning prompt that helps them set intention
             
             reflection = response.choices[0].message.content.strip()
             
+            # Enforce word count limits (80-120 words)
+            reflection = self._enforce_word_limits(reflection, 80, 120, 'weekly_reflection')
+            
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
                 await self.pattern_tracker.store_pattern(user_id, 'weekly_reflection', reflection)
@@ -710,6 +806,9 @@ Generate a single, engaging day planning prompt that motivates them to list thei
             
             planning = response.choices[0].message.content.strip()
             
+            # Enforce word count limits (20-30 words)
+            planning = self._enforce_word_limits(planning, 20, 30, 'day_planning')
+            
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
                 await self.pattern_tracker.store_pattern(user_id, 'day_planning', planning)
@@ -794,6 +893,9 @@ Generate a single, energizing midday affirmation that acknowledges progress and 
             
             affirmation = response.choices[0].message.content.strip()
             
+            # Enforce word count limits (~20 words)
+            affirmation = self._enforce_word_limits(affirmation, 15, 25, 'midday_affirmation')
+            
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
                 await self.pattern_tracker.store_pattern(user_id, 'midday_affirmation', affirmation)
@@ -877,6 +979,9 @@ Generate a single, soothing evening affirmation that helps them release today an
             )
             
             affirmation = response.choices[0].message.content.strip()
+            
+            # Enforce word count limits (~20 words)
+            affirmation = self._enforce_word_limits(affirmation, 15, 25, 'evening_affirmation')
             
             # Store pattern for anti-repetition
             if self.pattern_tracker:
