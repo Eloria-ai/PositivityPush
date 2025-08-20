@@ -16,6 +16,7 @@ from app.services.enhanced_prompts import EnhancedPromptEngine
 from app.services.specialized_coaches import CoachType
 from app.services.core_personality import core_personality, ConversationContext
 from app.services.pattern_tracker import PatternTracker
+from app.services.message_validator import MessageValidator
 
 # Configure structured logging
 logger = get_logger("app.services.ai_coach")
@@ -29,6 +30,7 @@ class AICoachService:
         self.psychological_framework = PsychologicalFramework()
         self.prompt_engine = EnhancedPromptEngine()
         self.pattern_tracker = PatternTracker(supabase_service) if supabase_service else None
+        self.message_validator = MessageValidator(supabase_service) if supabase_service else None
         self.model = settings.OPENAI_MODEL
     
     async def generate_welcome_message(self, subscription: Dict[str, Any]) -> str:
@@ -255,8 +257,15 @@ Generate a single, concise morning affirmation that feels personal and resonates
             
             affirmation = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (15-22 words)
-            affirmation = self._enforce_word_limits(affirmation, 15, 22, 'daily_affirmation')
+            # Post-generation validation and correction
+            if self.message_validator:
+                validation_result = self.message_validator.validate_and_correct(affirmation, 'daily_affirmation', user_id)
+                affirmation = validation_result.corrected_message
+                if validation_result.changes_made:
+                    logger.info(f"Daily affirmation corrected: {validation_result.changes_made}")
+            else:
+                # Fallback word count enforcement if validator not available
+                affirmation = self._enforce_word_limits(affirmation, 15, 22, 'daily_affirmation')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -349,8 +358,15 @@ Generate a single, gentle gratitude prompt that invites peaceful reflection with
             
             prompt = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (22-38 words)
-            prompt = self._enforce_word_limits(prompt, 22, 38, 'gratitude_prompt')
+            # Post-generation validation and correction
+            if self.message_validator:
+                validation_result = self.message_validator.validate_and_correct(prompt, 'gratitude_prompt', user_id)
+                prompt = validation_result.corrected_message
+                if validation_result.changes_made:
+                    logger.info(f"Gratitude prompt corrected: {validation_result.changes_made}")
+            else:
+                # Fallback word count enforcement if validator not available
+                prompt = self._enforce_word_limits(prompt, 22, 38, 'gratitude_prompt')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -448,6 +464,13 @@ Generate ONLY the first step: a gentle check-in that recaps their morning plan a
             )
             
             checkin_message = response.choices[0].message.content.strip()
+            
+            # Post-generation validation and correction
+            if self.message_validator:
+                validation_result = self.message_validator.validate_and_correct(checkin_message, 'accountability_checkin', user_id)
+                checkin_message = validation_result.corrected_message
+                if validation_result.changes_made:
+                    logger.info(f"Accountability checkin corrected: {validation_result.changes_made}")
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -717,8 +740,15 @@ Generate an encouraging first-week planning prompt that helps them set intention
             
             reflection = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (80-120 words)
-            reflection = self._enforce_word_limits(reflection, 80, 120, 'weekly_reflection')
+            # Post-generation validation and correction
+            if self.message_validator:
+                validation_result = self.message_validator.validate_and_correct(reflection, 'weekly_reflection', user_id)
+                reflection = validation_result.corrected_message
+                if validation_result.changes_made:
+                    logger.info(f"Weekly reflection corrected: {validation_result.changes_made}")
+            else:
+                # Fallback word count enforcement if validator not available
+                reflection = self._enforce_word_limits(reflection, 80, 120, 'weekly_reflection')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -806,8 +836,15 @@ Generate a single, engaging day planning prompt that motivates them to list thei
             
             planning = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (20-30 words)
-            planning = self._enforce_word_limits(planning, 20, 30, 'day_planning')
+            # Post-generation validation and correction
+            if self.message_validator:
+                validation_result = self.message_validator.validate_and_correct(planning, 'day_planning', user_id)
+                planning = validation_result.corrected_message
+                if validation_result.changes_made:
+                    logger.info(f"Day planning corrected: {validation_result.changes_made}")
+            else:
+                # Fallback word count enforcement if validator not available
+                planning = self._enforce_word_limits(planning, 20, 30, 'day_planning')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -893,8 +930,15 @@ Generate a single, energizing midday affirmation that acknowledges progress and 
             
             affirmation = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (~20 words)
-            affirmation = self._enforce_word_limits(affirmation, 15, 25, 'midday_affirmation')
+            # Post-generation validation and correction
+            if self.message_validator:
+                validation_result = self.message_validator.validate_and_correct(affirmation, 'midday_affirmation', user_id)
+                affirmation = validation_result.corrected_message
+                if validation_result.changes_made:
+                    logger.info(f"Midday affirmation corrected: {validation_result.changes_made}")
+            else:
+                # Fallback word count enforcement if validator not available
+                affirmation = self._enforce_word_limits(affirmation, 15, 25, 'midday_affirmation')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -980,8 +1024,15 @@ Generate a single, soothing evening affirmation that helps them release today an
             
             affirmation = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (~20 words)
-            affirmation = self._enforce_word_limits(affirmation, 15, 25, 'evening_affirmation')
+            # Post-generation validation and correction
+            if self.message_validator:
+                validation_result = self.message_validator.validate_and_correct(affirmation, 'evening_affirmation', user_id)
+                affirmation = validation_result.corrected_message
+                if validation_result.changes_made:
+                    logger.info(f"Evening affirmation corrected: {validation_result.changes_made}")
+            else:
+                # Fallback word count enforcement if validator not available
+                affirmation = self._enforce_word_limits(affirmation, 15, 25, 'evening_affirmation')
             
             # Store pattern for anti-repetition
             if self.pattern_tracker:
