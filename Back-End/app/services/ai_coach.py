@@ -84,105 +84,116 @@ class AICoachService:
         message: str, 
         user_context: Dict[str, Any]
     ) -> str:
-        """Generate psychologically-informed AI coach response with enhanced error handling"""
+        """Generate natural, conversational AI coach response following human conversation patterns"""
         start_time = datetime.now()
         
         try:
             # Get user's memory/context from mem0 with timeout
             user_memories = await self._safe_get_memories(user_id)
             
-            # Create psychological profile (simplified for now)
-            user_profile = self._build_psychological_profile(user_context, user_memories)
+            # Extract recent conversation context (last 3 interactions)
+            recent_context = ""
+            if user_memories:
+                recent_context = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
             
-            # Analyze message psychology
-            psychological_analysis = self.psychological_framework.analyze_message_psychology(
-                message, user_memories
-            )
+            # Get anti-repetition instructions for conversational responses
+            variety_addon = ""
+            if self.pattern_tracker:
+                # Enable pattern tracking for conversational responses to prevent repetition
+                variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'conversation')
             
-            # Generate response strategy
-            response_strategy = self.psychological_framework.generate_psychological_response_strategy(
-                psychological_analysis, user_profile
-            )
+            # Build conversational system prompt with quality controls
+            system_prompt = f"""You are Maya, a warm AI life coach. Respond naturally like a supportive friend who truly listens.
+
+CONVERSATIONAL FLOW - "REFLECT → ONE QUESTION → MICRO-STEP":
+• REFLECT: Acknowledge what they shared using their exact words (mirror their language)  
+• ONE QUESTION: Ask exactly one thoughtful question (never multiple questions)
+• MICRO-STEP: Offer one tiny, actionable step they can try (optional, not always needed)
+
+HUMAN CONVERSATION RULES:
+• Use natural, everyday language with contractions ("I'm", "you're", "that's")
+• Keep responses under 60 words total (2-3 short sentences maximum)  
+• Mirror their specific details - reference what they actually said, not generic concepts
+• Match their emotional tone and energy level
+• One question max per response - never ask multiple things
+• Sound like a friend texting, not a professional coach
+
+AUTHENTIC VOICE PRINCIPLES:
+• Reference concrete details they mentioned, not abstract concepts
+• Use their exact words when reflecting back ("stressed about the presentation" not "experiencing anxiety")
+• Respond to their actual situation, not coaching templates
+• Keep it conversational - avoid formal or clinical language
+• Show genuine curiosity about their specific experience
+
+QUALITY VALIDATION - BANNED PHRASES:
+• Generic coaching: "That's fantastic!", "Amazing progress!", "Incredible journey!"
+• Formal language: "I appreciate you sharing", "Thank you for being vulnerable"
+• Multiple questions: "How did that feel? What will you do next? When will you start?"
+• Vague responses: "Tell me more" (be specific about what you want to know)
+• Clinical terms: "validate your feelings", "process this experience"
+
+CONVERSATION STARTERS TO AVOID:
+• "Hey there! How's your day going?"
+• "That's a fantastic goal!"
+• "I'm so proud of you!"
+• "What brings you here today?"
+
+USER CONTEXT:
+- Recent conversations: {recent_context[:200] if recent_context else 'New conversation beginning'}
+- Their goals: {user_context.get('personal_goals', 'exploring personal growth')}
+- Communication style: {user_context.get('communication_style', 'casual and supportive')}{variety_addon}
+
+Respond naturally to what they shared, using their specific words and asking one genuine question about their situation."""
             
-            # Detect if we should use a specialized coach
-            current_hour = datetime.now().hour
-            coach_type = self.prompt_engine.detect_coaching_scenario(
-                message, user_memories, current_hour
-            )
-            
-            # Use specialized coach prompt or fallback to enhanced prompt
-            if coach_type != CoachType.ALWAYS_ON:
-                logger.info("ai_specialized_coach_selected",
-                       user_id=user_id,
-                       coach_type=coach_type.value)
-                enhanced_prompt = self.prompt_engine.get_specialized_coach_prompt(
-                    coach_type=coach_type,
-                    user_context=user_context,
-                    conversation_history=user_memories
-                )
-            else:
-                # Use consolidated personality system for general conversations
-                user_profile_data = {
-                    'goals': user_context.get('goals', ''),
-                    'recent_challenges': psychological_analysis.get('emotional_state', ''),
-                    'communication_style': user_context.get('communication_style', ''),
-                    'progress_notes': user_memories[:100] if user_memories else ''
-                }
-                
-                enhanced_prompt = core_personality.get_context_aware_personality(
-                    context=ConversationContext.GENERAL_CONVERSATION,
-                    user_profile=user_profile_data
-                )
-            
-            # Debug: Log the prompt being sent to OpenAI
-            logger.debug("ai_prompt_debug",
-                        user_id=user_id,
-                        prompt_preview=enhanced_prompt[:200])
-            
-            # Generate AI response using enhanced prompt
+            # Generate AI response with improved parameters for consistency
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": enhanced_prompt},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": message}
                 ],
-                max_tokens=300,
-                temperature=0.8
+                max_tokens=80,  # Reduced from 300 to enforce conciseness (≤60 words target)
+                temperature=0.6,  # Reduced from 0.8 for more consistent adherence to rules
+                frequency_penalty=0.4,  # Higher to prevent vocabulary repetition
+                presence_penalty=0.3    # Higher to encourage fresh responses
             )
             
             ai_response = response.choices[0].message.content.strip()
             
-            # Store interaction with enhanced metadata
+            # Runtime quality validation to prevent generic responses
+            ai_response = self._validate_conversational_response(ai_response, message)
+            
+            # Store pattern for anti-repetition (enable pattern tracking for conversations)
+            if self.pattern_tracker:
+                await self.pattern_tracker.store_pattern(user_id, 'conversation', ai_response)
+            
+            # Store interaction with simplified metadata  
             conversation_messages = [
                 {"role": "user", "content": message},
                 {"role": "assistant", "content": ai_response}
             ]
             
-            # Enhanced metadata with psychological insights and coach type
+            # Simplified metadata focused on conversation quality
             metadata = {
                 "interaction_type": "conversation",
-                "coach_type": coach_type.value,
-                "emotional_state": [state.value for state in psychological_analysis.get("emotional_state", [])],
-                "cognitive_patterns": [pattern.value for pattern in psychological_analysis.get("cognitive_patterns", [])],
-                "motivation_level": psychological_analysis.get("motivation_level", 5),
-                "primary_technique": response_strategy.get("primary_technique", "supportive"),
-                "behavioral_cues": psychological_analysis.get("behavioral_cues", {}),
+                "response_length_words": len(ai_response.split()),
+                "contains_question": "?" in ai_response,
                 "timestamp": datetime.now().isoformat()
             }
             
             await self._enhance_memory_storage(conversation_messages, user_id, metadata)
             
-            logger.info("ai_response_generated",
+            logger.info("ai_conversation_response_generated",
                        user_id=user_id,
-                       primary_technique=response_strategy.get('primary_technique'),
-                       coach_type=coach_type.value)
+                       response_length=len(ai_response.split()),
+                       contains_question="?" in ai_response)
             
             # Log performance
             response_time = (datetime.now() - start_time).total_seconds()
             logger.info("ai_response_performance",
                        user_id=user_id,
                        response_time_seconds=response_time,
-                       coach_type=coach_type.value)
+                       response_type="conversation")
             
             return ai_response
             
@@ -638,6 +649,52 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
             logger.debug(f"Message under minimum for {message_type}: {word_count} words (min: {min_words})")
         
         return text
+    
+    def _validate_conversational_response(self, ai_response: str, user_message: str) -> str:
+        """Runtime quality validation to prevent generic AI responses"""
+        if not ai_response:
+            return ai_response
+            
+        response_lower = ai_response.lower()
+        
+        # Check for banned generic phrases
+        generic_phrases = [
+            "that's fantastic",
+            "that's amazing", 
+            "that's incredible",
+            "fantastic goal",
+            "amazing progress",
+            "incredible journey",
+            "i'm so proud",
+            "hey there! how's",
+            "what brings you here",
+            "i appreciate you sharing",
+            "thank you for being vulnerable"
+        ]
+        
+        # Check for multiple questions (violates single question rule)
+        question_count = ai_response.count('?')
+        
+        # Check word count (should be ≤60 words)
+        word_count = len(ai_response.split())
+        
+        # If response fails validation, provide contextual alternative
+        has_generic_phrase = any(phrase in response_lower for phrase in generic_phrases)
+        
+        if has_generic_phrase or question_count > 1 or word_count > 70:
+            logger.warning(f"Conversational response failed validation: generic={has_generic_phrase}, questions={question_count}, words={word_count}")
+            
+            # Generate simple contextual response based on user's message
+            if any(word in user_message.lower() for word in ['work', 'job', 'meeting', 'presentation']):
+                return "That sounds like a lot to handle at work. What's the most stressful part about it?"
+            elif any(word in user_message.lower() for word in ['tired', 'exhausted', 'overwhelmed']):
+                return "I hear that you're feeling drained. What's been taking up most of your energy lately?"
+            elif any(word in user_message.lower() for word in ['excited', 'happy', 'good', 'great']):
+                return "It's nice to hear things are going well! What's been the best part?"
+            else:
+                return "Tell me more about what's on your mind right now."
+        
+        return ai_response
     
     def _get_fallback_response(self, message: str) -> str:
         """Generate contextual fallback response using personality system"""

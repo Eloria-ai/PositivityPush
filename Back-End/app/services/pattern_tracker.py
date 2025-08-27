@@ -36,7 +36,8 @@ class PatternTracker:
             'midday_affirmation': True,
             'evening_affirmation': True,
             'day_planning': True,  # Now enabled for improved planning messages
-            'accountability_checkin': True  # Now enabled for improved check-in messages
+            'accountability_checkin': True,  # Now enabled for improved check-in messages
+            'conversation': True  # Now enabled for conversational responses anti-repetition
         }
     
     def extract_pattern(self, message: str) -> MessagePattern:
@@ -200,6 +201,9 @@ class PatternTracker:
             instructions.append("• ROTATE openers: Now that → Let's → Ready to → Time to → Today you'll")
         elif message_type == 'accountability_checkin':
             instructions.append("• ROTATE approaches: completion check → progress review → challenge focus → win celebration")
+        elif message_type == 'conversation':
+            instructions.append("• ROTATE conversation starters: context reflection → gentle question → specific curiosity → supportive acknowledgment")
+            instructions.append("• AVOID generic responses: 'How are you?', 'Tell me more', 'That's great', 'I understand'")
         
         return "\n".join(instructions)
     
