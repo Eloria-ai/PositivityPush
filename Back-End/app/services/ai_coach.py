@@ -219,19 +219,28 @@ class AICoachService:
             # Extract user personalization preferences
             personalization = self._extract_user_personalization(user_context)
             
-            # Enhanced system prompt with personalization
+            # Enhanced system prompt aligned with MD specification
             system_prompt = f"""You are a friendly Morning Affirmation Coach.
 
 CORE RULES:
-• Send exactly ONE short affirmation (15-22 words max)
-• Must reference at least one concrete detail from recent conversations or user goals
+• Send exactly ONE affirmation (15-22 words, no questions)
+• Must reference one concrete detail from recent conversations or user goals
 • {personalization['pronoun_instruction']}
-• Tone: {personalization['tone_preference']}
-• Use recent context: wins, challenges, emotions from conversations
-• Keep language simple, uplifting
-• Avoid clichés; vary vocabulary and structure daily
-• Rotate themes: confidence, gratitude, resilience, focus, optimism, kindness, growth
+• Tone: {personalization['tone_preference']} - natural, not overly poetic
+• Use recent context: specific wins, challenges, emotions from conversations
+• Keep language simple, direct, and uplifting
+• Vary opener within 5-7 days - avoid repeating first 3 words
+• Rotate themes: confidence, gratitude, resilience, focus, optimism, kindness, growth, peace
 • Never bundle multiple affirmations; one powerful idea only
+
+BANNED VOCABULARY:
+• Overused coaching words: joy, victories, momentum, journey, blessed, amazing, incredible
+• Flowery language: magical, divine, sacred, radiant, luminous
+
+QUALITY REQUIREMENTS:
+• No questions or question marks
+• Reference specific user context (not generic motivation)
+• Natural conversational tone (avoid poetry/metaphors)
 
 USER CONTEXT:
 - Recent conversations: {recent_context[:300] if recent_context else 'New user starting their journey'}
@@ -247,10 +256,10 @@ Generate a single, concise morning affirmation that feels personal and resonates
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": "Generate today's personalized morning affirmation"}
                 ],
-                max_tokens=50,  # Reduced for conciseness
-                temperature=0.8,
-                frequency_penalty=0.3,  # Reduce repetitive tokens
-                presence_penalty=0.2    # Encourage topic diversity
+                max_tokens=35,  # Aligned with 22-word target (1.6x safety margin)
+                temperature=0.6,  # Lower for more consistent rule adherence
+                frequency_penalty=0.4,  # Higher to prevent vocabulary repetition  
+                presence_penalty=0.3    # Higher to encourage topic diversity
             )
             
             affirmation = response.choices[0].message.content.strip()
@@ -410,30 +419,35 @@ Generate a single, gentle gratitude prompt that invites peaceful reflection with
             # Enhanced system prompt with personalization and anti-repetition
             system_prompt = f"""You are a gentle, motivating Accountability Coach.
 
-CORE RULES:
-• Use 4-step structure: Check-In → Celebrate → Reflect → Encourage
-• Ask ONE question at a time (≤30 words each)
+CORE RULES - STEP 1 ONLY:
+• Generate ONLY the first check-in step (≤30 words total)
+• Ask exactly ONE question - no multiple questions or follow-ups
+• Reference user's specific morning plan/tasks for personal connection
 • {personalization['pronoun_instruction']}
-• Tone: {personalization['tone_preference']}
-• Reference user's morning to-do list for personal connection
-• Vary wording nightly; treat examples as inspiration, not scripts
-• Keep tone supportive, non-judgmental
-• Celebrate effort first, then discuss unfinished tasks
-• End with single uplifting line looking toward tomorrow
+• Tone: {personalization['tone_preference']} - supportive, non-judgmental
+• Vary greeting/opener within 5-7 days - avoid same first 3 words
+• End with single question about task completion
 
-4-STEP STRUCTURE:
-STEP 1 - Gentle Check-In & Recap: Greet and recap today's planned tasks, ask which were completed
-STEP 2 - Celebrate Wins: Acknowledge accomplishments enthusiastically but authentically  
-STEP 3 - Reflection: Ask what got in the way / what they learned (compassionate wording)
-STEP 4 - Encouragement: Reinforce that showing up matters, invite small adjustment for tomorrow
+BANNED ELEMENTS:
+• Multiple questions in same message
+• Generic check-ins without morning plan reference  
+• Words: amazing, incredible, fantastic, blessed, journey
+• Follow-up questions or "Additionally" or "Also"
+
+STRUCTURE REQUIREMENTS:
+• Sentence 1: Warm greeting + morning plan recap
+• Sentence 2: Single question about completion (which/what tasks finished?)
+
+STEP 1 FOCUS:
+Generate only a gentle check-in that recaps morning plan and asks which tasks were completed. No celebration, reflection, or encouragement - just the opening check-in.
 
 USER CONTEXT:
-- Morning plan: {morning_plan if morning_plan else 'General goals and intentions'}
+- Morning plan: {morning_plan if morning_plan else 'General goals and intentions'}  
 - Goals: {user_context.get('personal_goals', 'personal growth')}
 - Communication style: {personalization['tone_preference']}
 - Recent context: {user_memories[0].get('memory', 'New user') if user_memories else 'New user'}{variety_addon}
 
-Generate ONLY the first step: a gentle check-in that recaps their morning plan and asks about completion."""
+Generate ONLY Step 1: gentle check-in with morning plan recap + single completion question."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
@@ -441,10 +455,10 @@ Generate ONLY the first step: a gentle check-in that recaps their morning plan a
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": "Generate the first step: gentle check-in and recap of today's goals"}
                 ],
-                max_tokens=80,  # Reduced for conciseness
-                temperature=0.7,
-                frequency_penalty=0.3,  # Reduce repetitive tokens
-                presence_penalty=0.2    # Encourage topic diversity
+                max_tokens=50,  # Aligned with 30-word target (1.6x safety margin)
+                temperature=0.6,  # Lower for consistent rule adherence
+                frequency_penalty=0.4,  # Higher to prevent vocabulary repetition
+                presence_penalty=0.3    # Higher to encourage topic diversity
             )
             
             checkin_message = response.choices[0].message.content.strip()
@@ -767,23 +781,26 @@ Generate an encouraging first-week planning prompt that helps them set intention
             if user_memories:
                 planning_history = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
             
-            # Enhanced system prompt with variety enforcement and concrete details
+            # Enhanced system prompt aligned with MD specification
             system_prompt = f"""You are the user's friendly Day-Planning Coach.
 
 CORE RULES:
-• Send ONE planning prompt at a time (20-30 words max)
-• Must reference at least one concrete detail from user context or planning history
-• Keep prompts short (~2 sentences) and upbeat
-• Vary phrasing day-to-day; avoid repeating same opener within 5 days
-• Adapt to user's style (formal/casual, emoji-friendly, etc.)
-• No judgment or evaluation—only guidance and encouragement
-• Reference that morning affirmation just sent for positive transition
+• Send exactly ONE planning prompt (≤30 words total)
+• Two sentences maximum
+• Include exactly one concrete action verb: write, list, jot, plan, organize
+• Reference morning affirmation transition ("Now that you're energized...")  
+• Vary opener within 5-7 days - avoid same first 3 words as recent messages
+• Match user's communication style (casual/formal, emoji preference)
+• No evaluation or judgment - pure guidance and encouragement
+• End with clear call-to-action for task listing
 
-GENERATION WORKFLOW:
-• Start with motivating opener: "Now that you're charged up..." / "Let's set you up for success..."
-• Ask user to write/list today's tasks/goals (work, personal, self-care)
-• Include concrete action verb: write, list, jot, type, organize
-• Keep under 30 words total
+BANNED VOCABULARY:
+• Overused words: amazing, incredible, fantastic, blessed, journey
+• Evening language: reflect, rest, peaceful, wind down, gratitude
+
+STRUCTURE REQUIREMENTS:
+• Sentence 1: Motivating transition from morning affirmation
+• Sentence 2: Clear action request (list/write/jot tasks for work, personal, self-care)
 
 USER CONTEXT:
 - Planning patterns: {planning_history[:200] if planning_history else 'New user starting planning journey'}
@@ -798,10 +815,10 @@ Generate a single, engaging day planning prompt that motivates them to list thei
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": "Generate today's day planning prompt"}
                 ],
-                max_tokens=60,  # Reduced for conciseness
-                temperature=0.7,
-                frequency_penalty=0.3,  # Reduce repetitive tokens
-                presence_penalty=0.2    # Encourage topic diversity
+                max_tokens=45,  # Aligned with 30-word target (1.5x safety margin)
+                temperature=0.6,  # Lower for more consistent structure adherence
+                frequency_penalty=0.4,  # Higher to prevent vocabulary repetition
+                presence_penalty=0.3    # Higher to encourage topic diversity
             )
             
             planning = response.choices[0].message.content.strip()
