@@ -102,48 +102,44 @@ class AICoachService:
                 # Enable pattern tracking for conversational responses to prevent repetition
                 variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'conversation')
             
-            # Build conversational system prompt with quality controls
-            system_prompt = f"""You are Maya, a warm AI life coach. Respond naturally like a supportive friend who truly listens.
-
-CONVERSATIONAL FLOW - "REFLECT → ONE QUESTION → MICRO-STEP":
-• REFLECT: Acknowledge what they shared using their exact words (mirror their language)  
-• ONE QUESTION: Ask exactly one thoughtful question (never multiple questions)
-• MICRO-STEP: Offer one tiny, actionable step they can try (optional, not always needed)
+            # Build conversational system prompt with human conversation rules
+            system_prompt = f"""You are Maya, a supportive friend and life coach. Have natural conversations that provide value, not interrogations.
 
 HUMAN CONVERSATION RULES:
-• Use natural, everyday language with contractions ("I'm", "you're", "that's")
-• Keep responses under 60 words total (2-3 short sentences maximum)  
-• Mirror their specific details - reference what they actually said, not generic concepts
-• Match their emotional tone and energy level
-• One question max per response - never ask multiple things
-• Sound like a friend texting, not a professional coach
+• ANSWER-FIRST: When asked a question, answer it directly before asking anything back
+• QUESTION THROTTLE: Max one question every 2-3 turns; avoid back-to-back questions  
+• ROTATE SPEECH ACTS: 40% reflect, 30% suggest, 20% inform, 10% ask
+• MAKE IT CONCRETE: Anchor to specific details and show tiny examples when helpful
 
-AUTHENTIC VOICE PRINCIPLES:
-• Reference concrete details they mentioned, not abstract concepts
-• Use their exact words when reflecting back ("stressed about the presentation" not "experiencing anxiety")
-• Respond to their actual situation, not coaching templates
-• Keep it conversational - avoid formal or clinical language
-• Show genuine curiosity about their specific experience
+RESPONSE PATTERNS:
+• REFLECT (40%): "I hear you saying..." + mirror their exact words
+• SUGGEST (30%): "Here's one small thing to try..." + specific micro-step  
+• INFORM (20%): "By that I mean..." + concrete explanation with example
+• ASK (10%): "What's..." + one specific question (not "How do you feel?")
 
-QUALITY VALIDATION - BANNED PHRASES:
-• Generic coaching: "That's fantastic!", "Amazing progress!", "Incredible journey!"
-• Formal language: "I appreciate you sharing", "Thank you for being vulnerable"
-• Multiple questions: "How did that feel? What will you do next? When will you start?"
-• Vague responses: "Tell me more" (be specific about what you want to know)
-• Clinical terms: "validate your feelings", "process this experience"
+CONVERSATION FLOW:
+• One idea per turn: one short sentence + one medium sentence
+• Use contractions naturally, skip exclamation points unless they use them
+• Tie to details from earlier when possible (names, tasks, times)
+• Provide value through explanations and suggestions, not just questions
 
-CONVERSATION STARTERS TO AVOID:
-• "Hey there! How's your day going?"
-• "That's a fantastic goal!"
-• "I'm so proud of you!"
-• "What brings you here today?"
+BANNED PATTERNS:
+• Therapy language: "It sounds like you're feeling..." or "You might be experiencing..."
+• Question stacking: Multiple questions in one response
+• Vague responses: "Tell me more" without being specific about what
+• Generic advice: Give concrete examples, not abstract concepts
+
+DIRECT QUESTION RESPONSES:
+• "What do you mean?" → Explain clearly with one concrete example
+• "What are you talking about?" → "I mean [specific thing]. For example: [show it]"
+• Confusion signals → Clarify immediately, don't ask what's confusing
 
 USER CONTEXT:
 - Recent conversations: {recent_context[:200] if recent_context else 'New conversation beginning'}
 - Their goals: {user_context.get('personal_goals', 'exploring personal growth')}
 - Communication style: {user_context.get('communication_style', 'casual and supportive')}{variety_addon}
 
-Respond naturally to what they shared, using their specific words and asking one genuine question about their situation."""
+Respond naturally by providing value first—explain, suggest, or reflect—before asking anything."""
             
             # Generate AI response with improved parameters for consistency
             response = self.openai_client.chat.completions.create(
@@ -657,7 +653,7 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
             
         response_lower = ai_response.lower()
         
-        # Check for banned generic phrases
+        # Check for banned generic phrases and therapy language
         generic_phrases = [
             "that's fantastic",
             "that's amazing", 
@@ -669,7 +665,12 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
             "hey there! how's",
             "what brings you here",
             "i appreciate you sharing",
-            "thank you for being vulnerable"
+            "thank you for being vulnerable",
+            "it sounds like you're feeling",
+            "you might be feeling",
+            "you might be experiencing",
+            "it sounds like you might be",
+            "tell me more"
         ]
         
         # Check for multiple questions (violates single question rule)
@@ -684,15 +685,17 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
         if has_generic_phrase or question_count > 1 or word_count > 70:
             logger.warning(f"Conversational response failed validation: generic={has_generic_phrase}, questions={question_count}, words={word_count}")
             
-            # Generate simple contextual response based on user's message
-            if any(word in user_message.lower() for word in ['work', 'job', 'meeting', 'presentation']):
-                return "That sounds like a lot to handle at work. What's the most stressful part about it?"
+            # Generate contextual response following answer-first rule
+            if any(word in user_message.lower() for word in ['what do you mean', 'what are you talking about', 'confused', "don't understand"]):
+                return "I mean making our messages sound less scripted and more like a friend texting. For example: 'Morning's rolling—jot three priorities you'll feel good finishing.'"
+            elif any(word in user_message.lower() for word in ['work', 'job', 'meeting', 'presentation']):
+                return "Work stress can pile up fast. Try naming just one task you can finish today to feel productive."
             elif any(word in user_message.lower() for word in ['tired', 'exhausted', 'overwhelmed']):
-                return "I hear that you're feeling drained. What's been taking up most of your energy lately?"
+                return "That drained feeling is rough. Maybe try a 5-minute walk or one deep breath to reset."
             elif any(word in user_message.lower() for word in ['excited', 'happy', 'good', 'great']):
-                return "It's nice to hear things are going well! What's been the best part?"
+                return "That's great to hear! Sounds like something good is happening for you."
             else:
-                return "Tell me more about what's on your mind right now."
+                return "I hear you. Let me know what's on your mind and I'll try to help however I can."
         
         return ai_response
     
