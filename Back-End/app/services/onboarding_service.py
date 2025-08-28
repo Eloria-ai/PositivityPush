@@ -282,7 +282,7 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
             logger.info(f"Resolved AM/PM clarification: {hour} {period} -> {context}: {time_value}")
             
             # Generate acknowledgment and next question
-            acknowledgment = f"Perfect! I'll send you {self.get_context_description(context)} at {time_value}."
+            acknowledgment = f"Got it, {time_value} works for {self.get_context_description(context)}."
             
             # Check completion and get next question
             completion_status = await self.check_completion_status(preferences)
@@ -341,7 +341,7 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
             
             # Generate acknowledgment and next question
             day_title = day.title()
-            acknowledgment = f"Perfect! I'll send you weekly reflections on {day_title} at {time_value}."
+            acknowledgment = f"Got it, {day_title} at {time_value} works for weekly reflections."
             
             # Check completion and get next question
             completion_status = await self.check_completion_status(preferences)
@@ -464,13 +464,13 @@ Return ONLY: "AM", "PM", or "UNCLEAR" (if not an AM/PM response)
                         await self.supabase.set_preference_value(user_id, "onboarding_step", None)
                         return {
                             "completed": True,
-                            "message": f"Perfect! I'll send you evening gratitude reminders at {time_value}.\n\n{self.get_completion_message()}"
+                            "message": f"Got it, {time_value} works for evening gratitude.\n\n{self.get_completion_message()}"
                         }
 
                     next_question = await self.get_next_question(preferences)
                     return {
                         "completed": False,
-                        "message": f"Perfect! I'll send you evening gratitude reminders at {time_value}. {next_question}"
+                        "message": f"Got it, {time_value} works for evening gratitude. {next_question}"
                     }
                 
                 # For other contexts or hours outside 6-12, proceed with normal clarification
@@ -643,38 +643,47 @@ RECENT CONVERSATION:
 
 USER JUST SAID: "{user_message}"
 
-TASK: Respond naturally as Maya, the AI life coach. Your response should:
+TASK: Follow human conversation rules - answer first, then ask.
 
-1. ACKNOWLEDGE what they said naturally (show you're listening)
-2. If they mentioned any schedule preferences, acknowledge them warmly  
-3. Then ask the SPECIFIC next question in the sequence
+ANSWER-FIRST RULES:
+• ACKNOWLEDGE their response using their specific words (not "That's a nice touch!")
+• Keep acknowledgment simple and natural (no exclamations unless they use them)
+• Then ask the SPECIFIC question below - don't create your own
 
 PROGRESS: {completion_status['progress']} schedule preferences collected
 
-NEXT SPECIFIC QUESTION TO ASK: "{specific_question}"
+NEXT SPECIFIC QUESTION: "{specific_question}"
 
-IMPORTANT: You MUST ask the specific question above. Don't create your own question.
+CONVERSATION QUALITY:
+• Natural tone - sound like texting a friend, not a life coach
+• Use contractions ("That's" not "That is")  
+• Avoid therapy language ("Got it" not "I hear that")
+• One simple sentence to acknowledge + one question
+• Max 35 words total
 
-STYLE GUIDELINES:
-- Sound like a real person having a conversation
-- Keep under 40 words
-- Acknowledge their response, then ask the specific question
-- Be warm and natural
+BANNED PATTERNS:
+• Exclamation overuse: "Got it!" "Perfect!" "That's nice!"
+• Coaching clichés: "That's a nice touch", "I love that", "Fantastic choice"
+• Formal language: "I appreciate", "Thank you for sharing"
 
-EXAMPLE FORMAT:
-"Got it, [acknowledge their response]! [ask the specific question above]"
+EXAMPLE FORMATS:
+• "Thanks, 3:33 PM works. {specific_question}"  
+• "Got it. {specific_question}"
+• "That time works. {specific_question}"
 
-Generate a natural acknowledgment + the specific question (max 40 words):
+Generate natural acknowledgment + the required question (max 35 words):
 """
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are Maya, a warm and natural AI life coach. Keep responses brief (under 40 words), natural, and focus on ONE thing at a time."},
+                    {"role": "system", "content": "You are Maya, a supportive friend helping collect schedule preferences. Follow the exact conversation rules provided."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=80,
-                temperature=0.8  # Higher temperature for more natural responses
+                max_tokens=65,  # Reduced from 80 for 35-word target
+                temperature=0.6,  # Reduced from 0.8 for more consistent rule adherence
+                frequency_penalty=0.4,  # Add to prevent repetitive language
+                presence_penalty=0.3   # Add to encourage variety
             )
             
             ai_response = response.choices[0].message.content.strip()
@@ -1521,13 +1530,10 @@ Return ONLY JSON or empty {{}} if no time found.
         )
     
     def get_completion_message(self) -> str:
-        """Get the completion message"""
+        """Get the completion message following natural conversation rules"""
         return (
-            "🎉 Perfect! Your personalized schedule is all set up!\n\n"
-            "I'll now send you perfectly timed messages based on your preferences. "
-            "You can always chat with me anytime for support, motivation, or just to talk.\n\n"
-            "Your coaching journey starts now! 🚀\n\n"
-            "✨ *Let's make every day a little brighter together!*"
+            "All set! I'll send your messages at the times you chose.\n\n"
+            "Feel free to chat with me anytime if you want to talk or need support."
         )
     
     def is_confirmation_response(self, user_input: str) -> bool:

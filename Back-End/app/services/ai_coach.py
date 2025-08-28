@@ -156,8 +156,8 @@ Respond naturally by providing value first—explain, suggest, or reflect—befo
             
             ai_response = response.choices[0].message.content.strip()
             
-            # Runtime quality validation to prevent generic responses
-            ai_response = self._validate_conversational_response(ai_response, message)
+            # Comprehensive post-generation quality enforcement
+            ai_response = self._enforce_post_generation_quality(ai_response, 'conversation', message)
             
             # Store pattern for anti-repetition (enable pattern tracking for conversations)
             if self.pattern_tracker:
@@ -277,8 +277,8 @@ Generate a single, concise morning affirmation that feels personal and resonates
             
             affirmation = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (15-22 words)
-            affirmation = self._enforce_word_limits(affirmation, 15, 22, 'daily_affirmation')
+            # Comprehensive post-generation quality enforcement
+            affirmation = self._enforce_post_generation_quality(affirmation, 'daily_affirmation')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -332,41 +332,41 @@ Generate a single, concise morning affirmation that feels personal and resonates
             if self.pattern_tracker:
                 variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'gratitude_prompt')
             
-            # Humanized evening gratitude with sensory focus
-            system_prompt = f"""You are a soothing Night-Gratitude Coach. Create calm, sensory-rich moments for peaceful transition to sleep.
+            # Night-Gratitude Style Card Implementation
+            system_prompt = f"""You are a Night-Gratitude Coach following the exact Night-Gratitude Style Card specifications.
 
-HUMAN EVENING TONE:
-• Write 2-3 natural sentences (22-38 words total) in quiet, warm cadence
-• No exclamation marks - keep completely calm for bedtime
-• One question maximum, ideally as the last gentle invitation (not required)
-• Use contractions naturally ("you're", "there's") for warmth
-• End with peaceful closure - no action items or replies needed
+STYLE CARD REQUIREMENTS:
+• Purpose: Gently cue appreciation; help user wind down
+• Length: 22-38 words, 1-3 short sentences
+• Questions: 0-1 (prefer none); if present, keep soft and single
+• Tone: quiet, warm, sleep-friendly; NO exclamation marks
+• Must include: one concrete noticing cue (sound/sensation/person/place/moment)
+• Structure: 1) Soft cue to slow down 2) Concrete noticing prompt 3) Optional gentle closer
 
-SENSORY & CONCRETE APPROACH:
-• Include one specific sensory cue: sound you might hear, texture you feel, or person who mattered today
-• Reference one concrete element from their day: specific interaction, moment, or small comfort
-• Use gentle imagery that invites natural noticing (breath, quiet moments, physical comfort)
-• Prefer concrete details over abstract concepts ("your warm coffee" vs "life's abundance")
+OPENER POOL (rotate daily):
+"As you settle in", "Before you drift off", "In the quiet tonight", "With your next breath",
+"As the day closes", "Let the stillness remind you", "When the house is quiet", "While you unwind"
 
-NATURAL GRATITUDE FLOW:
-• Gentle invitation to notice something specific from today
-• Connect to a sensory experience or peaceful moment
-• Optional soft question that doesn't require response
-• Calm closure that signals rest
+CONCRETE NOTICING CUES:
+• Sound/sensation/person/place/moment from today
+• Reference real details when available (person, small win, comfort)
+• Avoid abstract concepts - use specific, tangible elements
 
 BANNED ELEMENTS:
-• Flowery/poetic language: embrace, cradle, blanket, luminous, sacred, divine
-• Coaching clichés: blessed, grateful heart, abundance, magnificent, incredible  
-• Call-to-action language or energizing words
-• Multiple questions or conversation starters
-• Performative gratitude - keep authentic and natural
+• Hype/salesy language, directives to reply, stacked questions
+• Clichés: "journey/joy/victories/momentum"
+• Exclamation marks, energizing language
+
+EXAMPLES TO MATCH:
+"As you settle in, notice one small comfort from today—a kind word, warm light, or steady breath. Let that feeling linger."
+"In the quiet tonight, recall a moment that eased your shoulders—someone's help, a laugh, or a calm step. Hold it for a few breaths."
 
 USER CONTEXT:
-- Day's experiences: {day_context[:200] if day_context else 'New user ending their day peacefully'}
+- Day's experiences: {day_context[:100] if day_context else 'New user ending peacefully'}
 - Goals: {user_context.get('personal_goals', 'personal growth')}
-- Tone preference: {user_context.get('communication_style', 'warm and gentle')}{variety_addon}
+{variety_addon}
 
-Generate a single, gentle gratitude prompt that invites peaceful reflection without requiring a response."""
+Generate 1-3 sentences (22-38 words) following the Night-Gratitude Style Card."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
@@ -382,8 +382,8 @@ Generate a single, gentle gratitude prompt that invites peaceful reflection with
             
             prompt = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (22-38 words)
-            prompt = self._enforce_word_limits(prompt, 22, 38, 'gratitude_prompt')
+            # Comprehensive post-generation quality enforcement  
+            prompt = self._enforce_post_generation_quality(prompt, 'gratitude_prompt')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -407,12 +407,12 @@ Generate a single, gentle gratitude prompt that invites peaceful reflection with
                         user_id=user_id,
                         error=str(e),
                         exc_info=True)
-            # Gentle fallbacks based on system prompt examples
+            # Night-Gratitude Style Card compliant fallbacks
             fallbacks = [
-                "As you settle in tonight, notice one small joy that warmed your day and let it soothe you to sleep.",
-                "Before you drift off, breathe in gratitude for the lessons today offered and the people who stood beside you.",
-                "Let the quiet of the night remind you of every gentle moment—each one proof you are supported and safe.",
-                "Feel your heartbeat, recall a smile, and rest knowing today added another bright thread to your journey."
+                "As you settle in tonight, notice one small comfort from today—a kind word, warm light, or steady breath.",
+                "Before you drift off, recall a moment that eased your shoulders—someone's help, a laugh, or calm step.",
+                "In the quiet tonight, think of one person or small scene that made today softer.",
+                "While you unwind, hold one gentle moment close—the warmth of coffee, a friend's voice, or quiet peace."
             ]
             import random
             return random.choice(fallbacks)
@@ -487,6 +487,9 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
             
             checkin_message = response.choices[0].message.content.strip()
             
+            # Comprehensive post-generation quality enforcement
+            checkin_message = self._enforce_post_generation_quality(checkin_message, 'accountability_checkin')
+            
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
                 await self.pattern_tracker.store_pattern(user_id, 'accountability_checkin', checkin_message)
@@ -511,10 +514,10 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
                         exc_info=True)
             # Varied fallbacks based on system prompt examples
             fallbacks = [
-                "Let's look back at your day! What did you accomplish from your morning goals? What's still pending?",
-                "Quick recap: How did your planned tasks play out today? What made the cut?",
-                "Time to check in! Which goals from this morning did you tackle? What's left for tomorrow?",
-                "Let's review your day! From your morning plan, what got done and what's still open?"
+                "How did today's goals go? Which ones did you finish?",
+                "Quick check-in on your morning plan. What got done today?",
+                "Time to see how your day went. Which tasks did you complete?",
+                "Let's review your progress. What did you accomplish from your plan?"
             ]
             import random
             return random.choice(fallbacks)
@@ -646,56 +649,217 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
         
         return text
     
-    def _validate_conversational_response(self, ai_response: str, user_message: str) -> str:
-        """Runtime quality validation to prevent generic AI responses"""
+    def _enforce_post_generation_quality(self, ai_response: str, message_type: str, user_message: str = "") -> str:
+        """Comprehensive post-generation quality enforcement for all message types"""
         if not ai_response:
             return ai_response
-            
+        
+        original_response = ai_response
         response_lower = ai_response.lower()
         
-        # Check for banned generic phrases and therapy language
-        generic_phrases = [
-            "that's fantastic",
-            "that's amazing", 
-            "that's incredible",
-            "fantastic goal",
-            "amazing progress",
-            "incredible journey",
-            "i'm so proud",
-            "hey there! how's",
-            "what brings you here",
-            "i appreciate you sharing",
-            "thank you for being vulnerable",
-            "it sounds like you're feeling",
-            "you might be feeling",
-            "you might be experiencing",
-            "it sounds like you might be",
-            "tell me more"
+        # 1. ENFORCE ONE QUESTION MAX - Remove extra questions
+        question_count = ai_response.count('?')
+        if question_count > 1:
+            # Keep only the first question, remove others
+            sentences = ai_response.split('.')
+            kept_sentences = []
+            questions_kept = 0
+            
+            for sentence in sentences:
+                if '?' in sentence and questions_kept >= 1:
+                    # Skip additional questions
+                    continue
+                elif '?' in sentence:
+                    questions_kept += 1
+                    kept_sentences.append(sentence)
+                else:
+                    kept_sentences.append(sentence)
+            
+            ai_response = '.'.join(kept_sentences).strip()
+            if not ai_response.endswith('.') and not ai_response.endswith('?'):
+                ai_response += '.'
+            
+            logger.info(f"Removed extra questions: {question_count} → 1 in {message_type}")
+        
+        # 2. GRATITUDE/EVENING TONE ENFORCEMENT - Strip exclamations, keep calm
+        calm_message_types = ['gratitude_prompt', 'evening_affirmation']
+        if message_type in calm_message_types:
+            # Remove exclamation marks for calm tone
+            ai_response = ai_response.replace('!', '.')
+            # Fix double periods
+            ai_response = ai_response.replace('..', '.')
+            
+            # Soften energetic language for evening
+            evening_replacements = {
+                'Let\'s': 'As you',
+                'Time to': 'Take a moment to',
+                'Ready to': 'Gently',
+                'Get ready': 'Settle in to'
+            }
+            
+            for energetic, calm in evening_replacements.items():
+                ai_response = ai_response.replace(energetic, calm)
+        
+        # 3. THERAPY CLICHÉ BLOCKING
+        therapy_phrases = {
+            'i hear you saying': 'I see that you',
+            'it sounds like you\'re feeling': 'it seems you\'re',
+            'you might be feeling': 'you seem',
+            'it sounds like you might be': 'it seems you\'re',
+            'what i\'m hearing is': 'what I notice is',
+            'i can hear that': 'I notice that',
+            'that makes sense': 'I understand',
+            'i can understand': 'I get that'
+        }
+        
+        response_lower = ai_response.lower()
+        for therapy_phrase, replacement in therapy_phrases.items():
+            if therapy_phrase in response_lower:
+                # Case-preserving replacement
+                start_idx = response_lower.find(therapy_phrase)
+                if start_idx != -1:
+                    original_case = ai_response[start_idx:start_idx + len(therapy_phrase)]
+                    if original_case[0].isupper():
+                        replacement = replacement.capitalize()
+                    ai_response = ai_response[:start_idx] + replacement + ai_response[start_idx + len(therapy_phrase):]
+                    logger.info(f"Blocked therapy cliché '{therapy_phrase}' in {message_type}")
+        
+        # 4. PRONOUN HYGIENE - Bot never speaks as user
+        pronoun_violations = [
+            'i am ready to focus on my goals',
+            'i will accomplish',
+            'i can achieve',
+            'my morning goals',
+            'my daily plan'
         ]
         
-        # Check for multiple questions (violates single question rule)
-        question_count = ai_response.count('?')
+        response_lower = ai_response.lower()
+        for violation in pronoun_violations:
+            if violation in response_lower:
+                ai_response = ai_response.replace(violation, violation.replace('my ', 'your ').replace('i am', 'you are').replace('i will', 'you will').replace('i can', 'you can'))
+                logger.info(f"Fixed pronoun violation '{violation}' in {message_type}")
         
-        # Check word count (should be ≤60 words)
-        word_count = len(ai_response.split())
+        # 5. STYLE CARD COMPLIANCE - Message-specific checks
+        style_card_checks = {
+            'day_planning': {
+                'word_range': (20, 30),
+                'sentence_count': 2,
+                'required_elements': ['action_verb'],
+                'action_verbs': ['write', 'list', 'jot', 'type', 'plan', 'organize', 'note', 'outline'],
+                'banned_words': ['amazing', 'crush it', 'incredible', 'fantastic'],
+                'max_questions': 1,
+                'no_exclamations': True
+            },
+            'gratitude_prompt': {
+                'word_range': (22, 38),
+                'sentence_count': (1, 3),
+                'required_elements': ['concrete_noticing_cue'],
+                'banned_words': ['journey', 'joy', 'victories', 'momentum', 'blessed', 'abundance'],
+                'max_questions': 1,
+                'prefer_questions': 0,
+                'no_exclamations': True
+            },
+            'conversation': {'word_range': (0, 60), 'max_questions': 1},
+            'daily_affirmation': {'word_range': (15, 22)},
+            'accountability_checkin': {'word_range': (0, 35), 'max_questions': 1},
+            'weekly_reflection': {'word_range': (80, 120)},
+            'midday_affirmation': {'word_range': (15, 25)},
+            'evening_affirmation': {'word_range': (15, 25), 'no_exclamations': True}
+        }
         
-        # If response fails validation, provide contextual alternative
-        has_generic_phrase = any(phrase in response_lower for phrase in generic_phrases)
-        
-        if has_generic_phrase or question_count > 1 or word_count > 70:
-            logger.warning(f"Conversational response failed validation: generic={has_generic_phrase}, questions={question_count}, words={word_count}")
+        if message_type in style_card_checks:
+            checks = style_card_checks[message_type]
+            current_words = len(ai_response.split())
             
-            # Generate contextual response following answer-first rule
-            if any(word in user_message.lower() for word in ['what do you mean', 'what are you talking about', 'confused', "don't understand"]):
-                return "I mean making our messages sound less scripted and more like a friend texting. For example: 'Morning's rolling—jot three priorities you'll feel good finishing.'"
-            elif any(word in user_message.lower() for word in ['work', 'job', 'meeting', 'presentation']):
-                return "Work stress can pile up fast. Try naming just one task you can finish today to feel productive."
-            elif any(word in user_message.lower() for word in ['tired', 'exhausted', 'overwhelmed']):
-                return "That drained feeling is rough. Maybe try a 5-minute walk or one deep breath to reset."
-            elif any(word in user_message.lower() for word in ['excited', 'happy', 'good', 'great']):
-                return "That's great to hear! Sounds like something good is happening for you."
-            else:
-                return "I hear you. Let me know what's on your mind and I'll try to help however I can."
+            # Word range enforcement
+            if 'word_range' in checks:
+                min_words, max_words = checks['word_range']
+                if current_words > max_words and max_words > 0:
+                    # Smart sentence-boundary trimming
+                    sentences = ai_response.split('.')
+                    kept_text = ""
+                    
+                    for sentence in sentences:
+                        test_text = (kept_text + sentence + ".").strip()
+                        if len(test_text.split()) <= max_words:
+                            kept_text = test_text
+                        else:
+                            break
+                    
+                    if kept_text and kept_text != ai_response:
+                        ai_response = kept_text
+                        logger.info(f"Style card word limit enforced for {message_type}: {current_words} → {len(ai_response.split())} words")
+            
+            # Sentence count enforcement (for day_planning = exactly 2)
+            if 'sentence_count' in checks:
+                sentences = [s.strip() for s in ai_response.split('.') if s.strip()]
+                required_count = checks['sentence_count']
+                
+                if isinstance(required_count, int) and len(sentences) != required_count:
+                    if len(sentences) > required_count:
+                        # Keep only the required number of sentences
+                        ai_response = '. '.join(sentences[:required_count]) + '.'
+                        logger.info(f"Sentence count enforced for {message_type}: {len(sentences)} → {required_count} sentences")
+            
+            # Action verb requirement (day_planning)
+            if 'action_verbs' in checks:
+                action_verbs = checks['action_verbs']
+                response_lower = ai_response.lower()
+                has_action_verb = any(verb in response_lower for verb in action_verbs)
+                if not has_action_verb:
+                    logger.warning(f"Missing action verb in {message_type}: {ai_response}")
+            
+            # Banned words enforcement
+            if 'banned_words' in checks:
+                banned_words = checks['banned_words']
+                response_lower = ai_response.lower()
+                for banned in banned_words:
+                    if banned in response_lower:
+                        # Simple replacement for common banned words
+                        replacements = {
+                            'amazing': 'good', 'incredible': 'great', 'fantastic': 'solid',
+                            'crush it': 'do well', 'journey': 'path', 'victories': 'wins'
+                        }
+                        if banned in replacements:
+                            ai_response = ai_response.replace(banned, replacements[banned])
+                            logger.info(f"Replaced banned word '{banned}' in {message_type}")
+            
+            # No exclamations enforcement (gratitude, evening, day_planning)
+            if checks.get('no_exclamations', False):
+                if '!' in ai_response:
+                    ai_response = ai_response.replace('!', '.')
+                    ai_response = ai_response.replace('..', '.')
+                    logger.info(f"Removed exclamations for calm tone in {message_type}")
+        
+        # 6. CONTEXTUAL FALLBACK for conversations that fail multiple checks
+        if message_type == 'conversation' and user_message:
+            validation_failures = []
+            
+            # Check if still has therapy language after cleaning
+            remaining_therapy = any(phrase in ai_response.lower() for phrase in ['i hear you', 'it sounds like', 'you might be feeling'])
+            if remaining_therapy:
+                validation_failures.append('therapy_language')
+                
+            # Check if still over word limit significantly  
+            if len(ai_response.split()) > 75:
+                validation_failures.append('too_long')
+                
+            if validation_failures:
+                # Generate simple contextual response based on user's message
+                if any(word in user_message.lower() for word in ['what do you mean', 'what are you talking about', 'confused', "don't understand"]):
+                    return "I mean making responses feel more natural and less scripted. What specific part would you like me to explain?"
+                elif any(word in user_message.lower() for word in ['work', 'job', 'meeting', 'presentation']):
+                    return "Work stress can build up quickly. What's the biggest challenge you're facing with it right now?"
+                elif any(word in user_message.lower() for word in ['tired', 'exhausted', 'overwhelmed']):
+                    return "That sounds draining. What's been taking up most of your energy lately?"
+                elif any(word in user_message.lower() for word in ['excited', 'happy', 'good', 'great']):
+                    return "That's good to hear. What's been going well for you?"
+                else:
+                    return "Tell me what's on your mind and I'll do my best to help."
+        
+        # Log if significant changes were made
+        if ai_response != original_response:
+            logger.info(f"Post-generation quality enforcement applied to {message_type}")
         
         return ai_response
     
@@ -808,8 +972,8 @@ Generate an encouraging first-week planning prompt that helps them set intention
             
             reflection = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (80-120 words)
-            reflection = self._enforce_word_limits(reflection, 80, 120, 'weekly_reflection')
+            # Comprehensive post-generation quality enforcement
+            reflection = self._enforce_post_generation_quality(reflection, 'weekly_reflection')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -835,10 +999,10 @@ Generate an encouraging first-week planning prompt that helps them set intention
                         exc_info=True)
             # Varied fallbacks for different user types
             fallbacks = [
-                "🗓️ Welcome to your first weekly session! What would you love to accomplish or focus on in this very first week?",
-                "🗓️ Let's reflect on your week! Looking back at your recent goals, what went especially well for you?",
-                "🗓️ Time for our weekly check-in! What's one win from this past week that you're most proud of?",
-                "🗓️ As we start a new week, let's take a moment to reflect. What did you learn about yourself this past week?"
+                "Time for your first weekly check-in. What do you want to focus on this week?",
+                "Let's look at how your week went. What went well for you?", 
+                "Weekly reflection time. What's one thing you accomplished this week?",
+                "Starting a new week - what did you learn about yourself recently?"
             ]
             import random
             return random.choice(fallbacks)
@@ -858,39 +1022,37 @@ Generate an encouraging first-week planning prompt that helps them set intention
             if user_memories:
                 planning_history = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
             
-            # Humanized system prompt with conversational rhythm
-            system_prompt = f"""You are the user's friendly Day-Planning Coach. Write naturally and conversationally.
+            # Day-Planning Style Card Implementation
+            system_prompt = f"""You are a Day-Planning Coach following the exact Day-Planning Style Card specifications.
 
-HUMAN CONVERSATIONAL RULES:
-• Two natural sentences total (≤30 words); mix lengths: one short anchor + one slightly longer
-• Use contractions and everyday phrasing ("you'll", "let's", "here's")
-• Include exactly one concrete action verb: write, list, jot, plan, organize
-• Reference specific context when available: yesterday's win, morning energy, or concrete detail
-• Gentle activation tone - forward-looking without pressure
-• No motivational clichés unless user uses them first
+STYLE CARD REQUIREMENTS:
+• Purpose: Invite user to outline today's tasks with one clear action
+• Length: 20-30 words, two sentences exactly
+• Questions: 0-1 maximum; if used, must be final sentence
+• Tone: warm, plain, practical; NO exclamation marks
+• Must include: one action verb (write/list/jot/type/plan/organize/note/outline)
+• Structure: 1) Short orienting sentence 2) CTA sentence (optionally as question)
 
-SENTENCE STRUCTURE (vary daily):
-• Option A: Short opener + longer action request
-• Option B: Transition phrase + concise call-to-action  
-• Option C: Context reference + simple verb prompt
+OPENER POOL (rotate daily):
+"Now that the morning's rolling", "Let's set you up for today", "Quick plan for today", 
+"To make today smoother", "Before you dive in", "Let's give today some structure", 
+"A simple start works best", "For a clear head"
 
-AUTHENTIC VOICE GUIDELINES:
-• Prefer concrete nouns over adjectives ("your presentation" vs "your incredible work")
-• Use one gentle hedge per message if natural ("maybe", "might", "a small step")
-• Reference specific elements from user context: recent plans, goals, or wins
-• Match user's communication style (casual/formal, contractions vs formal)
+BANNED ELEMENTS:
+• Hype words: amazing, crush it, incredible, fantastic
+• Therapy clichés, vague filler like "stay positive"
+• Exclamation marks, second task lists in same turn
 
-BANNED VOCABULARY:
-• Overused coaching words: amazing, incredible, fantastic, blessed, journey, magical
-• Evening/reflection language: reflect, rest, peaceful, wind down, gratitude
-• Stacked motivational phrases
+EXAMPLES TO MATCH:
+"Let's set you up for today. Jot three priorities you'll feel good finishing before evening."
+"Quick plan for today. List the tasks that matter most—work, personal, or self-care."
 
 USER CONTEXT:
-- Planning patterns: {planning_history[:200] if planning_history else 'New user starting planning journey'}
-- Goals: {user_context.get('personal_goals', 'personal growth')}
-- Style preference: {user_context.get('communication_style', 'friendly and encouraging')}
+- Recent planning: {planning_history[:100] if planning_history else 'New user'}
+- Goals: {user_context.get('personal_goals', 'general productivity')}
+{variety_addon}
 
-Generate a single, engaging day planning prompt that motivates them to list their daily goals.{variety_addon}"""
+Generate exactly two sentences (20-30 words) following the Day-Planning Style Card."""
             
             response = self.openai_client.chat.completions.create(
                 model=self.model,
@@ -906,8 +1068,8 @@ Generate a single, engaging day planning prompt that motivates them to list thei
             
             planning = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (20-30 words)
-            planning = self._enforce_word_limits(planning, 20, 30, 'day_planning')
+            # Comprehensive post-generation quality enforcement
+            planning = self._enforce_post_generation_quality(planning, 'day_planning')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -929,10 +1091,10 @@ Generate a single, engaging day planning prompt that motivates them to list thei
                         exc_info=True)
             # Varied fallbacks based on system prompt examples
             fallbacks = [
-                "Now that you've started your day on a high note, let's plan your day. What tasks or goals do you want to tackle?",
-                "You're ready to make today amazing! List your top priorities—work, personal, or self-care.",
-                "Let's set you up for success. Jot down your to-do's, big or small; every step counts.",
-                "It's a fresh start—plan your day: what would make you feel proud by bedtime?"
+                "Let's set you up for today. Jot three priorities you'll feel good finishing.",
+                "Quick plan for today. List the tasks that matter most to you.",
+                "Before you dive in, give the day structure. Write your top three goals.",
+                "To make today smoother, outline what needs your attention most."
             ]
             import random
             return random.choice(fallbacks)
@@ -993,8 +1155,8 @@ Generate a single, energizing midday affirmation that acknowledges progress and 
             
             affirmation = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (~20 words)
-            affirmation = self._enforce_word_limits(affirmation, 15, 25, 'midday_affirmation')
+            # Comprehensive post-generation quality enforcement
+            affirmation = self._enforce_post_generation_quality(affirmation, 'midday_affirmation')
             
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
@@ -1080,8 +1242,8 @@ Generate a single, soothing evening affirmation that helps them release today an
             
             affirmation = response.choices[0].message.content.strip()
             
-            # Enforce word count limits (~20 words)
-            affirmation = self._enforce_word_limits(affirmation, 15, 25, 'evening_affirmation')
+            # Comprehensive post-generation quality enforcement  
+            affirmation = self._enforce_post_generation_quality(affirmation, 'evening_affirmation')
             
             # Store pattern for anti-repetition
             if self.pattern_tracker:
