@@ -132,6 +132,14 @@ class SupabaseService:
             # Single database update
             result = self.client.table("subscribers").update({"preferences": updated_prefs}).eq("id", user_id).execute()
             logger.info(f"Batch updated preferences for user: {user_id}, keys: {list(preference_updates.keys())}")
+            
+            # If any scheduling preferences were updated and user is onboarded, recreate scheduled messages
+            scheduling_preferences = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection', 'current_timezone']
+            updated_scheduling = any(key in scheduling_preferences for key in preference_updates.keys())
+            if updated_scheduling and updated_prefs.get('onboarding_completed'):
+                logger.info(f"🔄 Scheduling preferences updated for user {user_id}, recreating scheduled messages")
+                await self.create_scheduled_messages_for_user(user_id)
+            
             return True
         except Exception as e:
             logger.error(f"Error batch updating preferences: {e}")
@@ -147,7 +155,15 @@ class SupabaseService:
             current_prefs[key] = value
             
             # Save back to database
-            return await self.update_user_preferences(user_id, current_prefs)
+            success = await self.update_user_preferences(user_id, current_prefs)
+            
+            # If this is a scheduling preference and user is fully onboarded, recreate scheduled messages
+            scheduling_preferences = ['day_planning', 'accountability_checkin', 'evening_gratitude', 'weekly_reflection', 'current_timezone']
+            if success and key in scheduling_preferences and current_prefs.get('onboarding_completed'):
+                logger.info(f"🔄 Scheduling preference '{key}' updated for user {user_id}, recreating scheduled messages")
+                await self.create_scheduled_messages_for_user(user_id)
+            
+            return success
         except Exception as e:
             logger.error(f"Error setting preference {key} for user {user_id}: {e}")
             return False
@@ -698,6 +714,25 @@ class SupabaseService:
         """
         try:
             logger.info(f"🔧 Starting scheduled message creation for user {user_id}")
+            
+            # FIRST: Clean up any existing pending scheduled messages for this user
+            # This prevents duplicates when preferences are updated or onboarding is re-run
+            try:
+                cleanup_result = self.client.table("scheduled_messages") \
+                    .delete() \
+                    .eq("subscriber_id", user_id) \
+                    .eq("status", "pending") \
+                    .execute()
+                
+                cleanup_count = len(cleanup_result.data) if cleanup_result.data else 0
+                if cleanup_count > 0:
+                    logger.info(f"🧹 Cleaned up {cleanup_count} existing pending messages for user {user_id}")
+                else:
+                    logger.info(f"🧹 No existing pending messages to clean up for user {user_id}")
+                    
+            except Exception as cleanup_error:
+                logger.error(f"⚠️ Error cleaning up pending messages for user {user_id}: {cleanup_error}")
+                # Continue with creation even if cleanup fails
             
             # Get user data
             preferences = await self.get_user_preferences(user_id)
