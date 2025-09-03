@@ -106,6 +106,35 @@ CREATE TABLE IF NOT EXISTS user_progress (
     UNIQUE(subscriber_id, week_start)
 );
 
+-- Daily plans capture (for context-aware check-ins)
+CREATE TABLE IF NOT EXISTS daily_plans (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    subscriber_id UUID REFERENCES subscribers(id) ON DELETE CASCADE,
+    plan_date DATE NOT NULL,
+    items JSONB DEFAULT '[]', -- Structured array of plan items
+    raw_text TEXT, -- Original user response for reference
+    completion_status JSONB DEFAULT NULL, -- Array of {item, completed, item_number}
+    completion_response TEXT, -- User's raw completion response
+    completed_at TIMESTAMP WITH TIME ZONE DEFAULT NULL, -- When completion was recorded
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Prevent duplicates - one plan per user per day
+    UNIQUE(subscriber_id, plan_date)
+);
+
+-- Weekly goals tracking (aggregated from daily plans or explicit goals)
+CREATE TABLE IF NOT EXISTS weekly_goals (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    subscriber_id UUID REFERENCES subscribers(id) ON DELETE CASCADE,
+    week_start DATE NOT NULL, -- Monday of the week
+    items JSONB DEFAULT '[]', -- Structured array of weekly goals
+    source VARCHAR(20) DEFAULT 'daily_aggregate', -- 'daily_aggregate' or 'explicit'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Prevent duplicates - one set of goals per user per week
+    UNIQUE(subscriber_id, week_start)
+);
+
 -- Scheduled Messages table (UUID-based architecture)
 -- NOTE: IF NOT EXISTS preserves existing UUID column if table already exists
 CREATE TABLE IF NOT EXISTS scheduled_messages (

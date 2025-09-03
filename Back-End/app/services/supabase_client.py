@@ -168,6 +168,184 @@ class SupabaseService:
             logger.error(f"Error setting preference {key} for user {user_id}: {e}")
             return False
     
+    # Daily Plans Management (for context-aware messaging)
+    async def set_pending_intent(self, user_id: str, intent: str, date: str = None) -> bool:
+        """Set pending intent for capturing user responses (e.g., after day planning prompt)"""
+        try:
+            pending_intent = {"intent": intent, "date": date, "timestamp": datetime.utcnow().isoformat()}
+            return await self.set_preference_value(user_id, "pending_intent", pending_intent)
+        except Exception as e:
+            logger.error(f"Error setting pending intent for user {user_id}: {e}")
+            return False
+    
+    async def clear_pending_intent(self, user_id: str) -> bool:
+        """Clear pending intent after capturing user response"""
+        try:
+            return await self.set_preference_value(user_id, "pending_intent", None)
+        except Exception as e:
+            logger.error(f"Error clearing pending intent for user {user_id}: {e}")
+            return False
+    
+    async def store_daily_plan(self, user_id: str, plan_date: str, items: List[str], raw_text: str) -> bool:
+        """Store user's daily plan for context-aware check-ins"""
+        try:
+            # Use upsert to handle duplicates (replace if same date)
+            result = self.client.table("daily_plans").upsert({
+                "subscriber_id": user_id,
+                "plan_date": plan_date,
+                "items": items,
+                "raw_text": raw_text
+            }).execute()
+            
+            logger.info(f"Stored daily plan for user {user_id} on {plan_date}: {len(items)} items")
+            return True
+        except Exception as e:
+            logger.error(f"Error storing daily plan for user {user_id}: {e}")
+            return False
+    
+    async def get_daily_plan_for_date(self, user_id: str, date: str) -> Optional[Dict[str, Any]]:
+        """Get user's daily plan for specific date"""
+        try:
+            result = self.client.table("daily_plans") \
+                .select("*") \
+                .eq("subscriber_id", user_id) \
+                .eq("plan_date", date) \
+                .execute()
+            
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting daily plan for user {user_id} on {date}: {e}")
+            return None
+    
+    async def get_weekly_goals(self, user_id: str, week_start: str) -> Optional[Dict[str, Any]]:
+        """Get user's weekly goals for specific week"""
+        try:
+            result = self.client.table("weekly_goals") \
+                .select("*") \
+                .eq("subscriber_id", user_id) \
+                .eq("week_start", week_start) \
+                .execute()
+            
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting weekly goals for user {user_id}, week {week_start}: {e}")
+            return None
+    
+    def parse_daily_plan_items(self, user_text: str) -> List[str]:
+        """Parse user's daily plan response into structured items"""
+        if not user_text:
+            return []
+        
+        items = []
+        lines = user_text.strip().split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Handle different list formats
+            # Bullet points: "- task", "* task", "• task"
+            if line.startswith(('-', '*', '•')):
+                item = line[1:].strip()
+                if item:
+                    items.append(item)
+            # Numbered: "1. task", "1) task"  
+            elif line[0].isdigit() and ('. ' in line or ') ' in line):
+                # Find the separator and extract the task
+                if '. ' in line:
+                    item = line.split('. ', 1)[1].strip()
+                elif ') ' in line:
+                    item = line.split(') ', 1)[1].strip()
+                if item:
+                    items.append(item)
+            # Comma-separated in single line
+            elif ',' in user_text and len(lines) == 1:
+                # Split by commas if single line
+                comma_items = [item.strip() for item in user_text.split(',')]
+                items.extend([item for item in comma_items if item])
+                break  # Don't process more lines if we handled commas
+            # Plain task (no formatting)
+            else:
+                items.append(line)
+        
+        # Clean up and dedupe
+        cleaned_items = []
+        for item in items:
+            # Remove common prefixes and clean
+            item = item.strip().strip('.,')
+            if item and item not in cleaned_items:
+                cleaned_items.append(item)
+        
+        # Cap to 10 items max
+        return cleaned_items[:10]
+    
+    def parse_task_completion(self, user_text: str) -> List[int]:
+        """Parse user's task completion response (e.g., '1,3', '1 and 3', 'just 2')"""
+        import re
+        if not user_text:
+            return []
+        
+        # Find all numbers in the text
+        numbers = re.findall(r'\b(\d+)\b', user_text.lower())
+        completed_items = []
+        
+        for num_str in numbers:
+            try:
+                num = int(num_str)
+                if 1 <= num <= 10:  # Valid task numbers (1-10)
+                    completed_items.append(num)
+            except ValueError:
+                continue
+        
+        # Remove duplicates and sort
+        return sorted(list(set(completed_items)))
+    
+    async def update_task_completion(self, user_id: str, plan_date: str, completed_items: List[int], raw_response: str) -> bool:
+        """Update daily plan with task completion status"""
+        try:
+            # Get the current daily plan
+            result = self.client.table("daily_plans") \
+                .select("*") \
+                .eq("subscriber_id", user_id) \
+                .eq("plan_date", plan_date) \
+                .execute()
+            
+            if not result.data:
+                logger.warning(f"No daily plan found for user {user_id} on {plan_date}")
+                return False
+            
+            daily_plan = result.data[0]
+            current_items = daily_plan.get('items', [])
+            
+            # Create completion status for each item
+            completion_status = []
+            for i, item in enumerate(current_items):
+                item_number = i + 1  # 1-indexed for user display
+                is_completed = item_number in completed_items
+                completion_status.append({
+                    "item": item,
+                    "completed": is_completed,
+                    "item_number": item_number
+                })
+            
+            # Update the daily plan with completion data
+            update_result = self.client.table("daily_plans") \
+                .update({
+                    "completion_status": completion_status,
+                    "completion_response": raw_response,
+                    "completed_at": datetime.now().isoformat() if completed_items else None
+                }) \
+                .eq("id", daily_plan['id']) \
+                .execute()
+            
+            logger.info(f"Updated task completion for user {user_id}: {completed_items}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating task completion for user {user_id}: {e}")
+            return False
+
     async def is_onboarding_completed(self, user_id: str) -> bool:
         """Check if user has completed onboarding"""
         try:

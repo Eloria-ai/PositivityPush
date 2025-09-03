@@ -428,14 +428,18 @@ Generate 1-3 sentences (22-38 words) following the Night-Gratitude Style Card.""
             # Get user's memories for personalization
             user_memories = await self.mem0_service.get_memories(user_id)
             
-            # Get morning plan for reference
-            morning_plan = ""
-            if user_memories:
-                # Look for today's planning or goals
-                for mem in user_memories[:5]:
-                    if 'planning' in mem.get('memory', '').lower() or 'goals' in mem.get('memory', '').lower():
-                        morning_plan = mem.get('memory', '')[:200]
-                        break
+            # Get today's actual daily plan from database (instead of guessing from memory)
+            today_date = datetime.now().strftime('%Y-%m-%d')
+            daily_plan = await self.supabase.get_daily_plan_for_date(user_id, today_date)
+            
+            # Format planned items for the prompt
+            morning_plan_text = "General goals and intentions"
+            if daily_plan and daily_plan.get('items'):
+                planned_items = daily_plan['items'][:5]  # Limit to 5 items for message length
+                numbered_items = [f"{i+1}) {item}" for i, item in enumerate(planned_items)]
+                morning_plan_text = "You planned: " + ", ".join(numbered_items)
+            elif daily_plan and daily_plan.get('raw_text'):
+                morning_plan_text = f"You planned: {daily_plan['raw_text'][:100]}"
             
             # Extract user personalization preferences
             personalization = self._extract_user_personalization(user_context)
@@ -460,13 +464,13 @@ BANNED ELEMENTS:
 
 STRUCTURE REQUIREMENTS:
 • Sentence 1: Warm greeting + morning plan recap
-• Sentence 2: Single question about completion (which/what tasks finished?)
+• Sentence 2: Single question about completion - if numbered items exist, ask "Which numbers are done? (e.g., 1,3)" otherwise ask "What did you finish?"
 
 STEP 1 FOCUS:
 Generate only a gentle check-in that recaps morning plan and asks which tasks were completed. No celebration, reflection, or encouragement - just the opening check-in.
 
 USER CONTEXT:
-- Morning plan: {morning_plan if morning_plan else 'General goals and intentions'}  
+- Morning plan: {morning_plan_text}  
 - Goals: {user_context.get('personal_goals', 'personal growth')}
 - Communication style: {personalization['tone_preference']}
 - Recent context: {user_memories[0].get('memory', 'New user') if user_memories else 'New user'}{variety_addon}
@@ -504,6 +508,10 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
                 user_id=user_id,
                 metadata={"interaction_type": "accountability_checkin", "date": datetime.now().isoformat()}
             )
+            
+            # Set pending intent to capture user's completion response
+            if daily_plan and daily_plan.get('items'):
+                await self.supabase.set_pending_intent(user_id, 'capture_task_completion', today_date)
             
             return checkin_message
             
@@ -897,20 +905,45 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
         try:
             user_memories = await self.mem0_service.get_memories(user_id)
             
+            # Get current week's aggregated goals from daily plans
+            today = datetime.now()
+            # Get Monday of current week (weekday() returns 0=Monday, 6=Sunday)
+            monday_this_week = today - timedelta(days=today.weekday())
+            week_start = monday_this_week.strftime('%Y-%m-%d')
+            
+            # Get or create weekly goals for this week
+            weekly_goals = await self.supabase.get_weekly_goals_for_week(user_id, week_start)
+            
             # Check if this is a first-time user (no past week data)
             has_past_week_data = False
-            if user_memories:
-                # Look for interactions from past week
+            weekly_accomplishments = []
+            
+            if weekly_goals and weekly_goals.get('items'):
+                has_past_week_data = True
+                # Get completion data from daily plans for this week
+                for day_offset in range(7):  # Monday to Sunday
+                    day_date = monday_this_week + timedelta(days=day_offset)
+                    day_str = day_date.strftime('%Y-%m-%d')
+                    daily_plan = await self.supabase.get_daily_plan_for_date(user_id, day_str)
+                    
+                    if daily_plan and daily_plan.get('completion_status'):
+                        completed_today = [status['item'] for status in daily_plan['completion_status'] if status.get('completed')]
+                        weekly_accomplishments.extend(completed_today)
+            elif user_memories:
+                # Fallback to memory-based check for past week
                 week_ago = datetime.now() - timedelta(days=7)
                 for mem in user_memories:
                     if 'timestamp' in mem and datetime.fromisoformat(mem['timestamp']) > week_ago:
                         has_past_week_data = True
                         break
             
-            # Get past week context for returning users
+            # Format context for the prompt
             past_week_context = ""
-            if has_past_week_data and user_memories:
-                past_week_context = " ".join([mem.get('memory', '') for mem in user_memories[:5]])
+            if has_past_week_data:
+                if weekly_accomplishments:
+                    past_week_context = f"Week's accomplishments: {', '.join(weekly_accomplishments[:10])}"
+                elif user_memories:
+                    past_week_context = " ".join([mem.get('memory', '') for mem in user_memories[:5]])
             
             # Get anti-repetition instructions
             variety_addon = ""
@@ -935,7 +968,8 @@ CORE RULES:
 • Natural, not scripted
 
 USER CONTEXT:
-- Week's conversations: {past_week_context[:300]}
+- Weekly goals: {weekly_goals.get('items', []) if weekly_goals else 'No specific weekly goals set'}
+- Accomplishments: {weekly_accomplishments[:5] if weekly_accomplishments else 'No tracked completions this week'}
 - Goals: {user_context.get('personal_goals', 'personal growth')}
 - Plan: {user_context.get('plan_type', '3_month')} subscription{variety_addon}
 
@@ -1015,40 +1049,38 @@ Generate an encouraging first-week planning prompt that helps them set intention
             if self.pattern_tracker:
                 variety_addon = await self.pattern_tracker.generate_anti_repetition_addon(user_id, 'day_planning')
             
-            user_memories = await self.mem0_service.get_memories(user_id)
-            
-            # Get user's planning patterns and preferences
-            planning_history = ""
-            if user_memories:
-                planning_history = " ".join([mem.get('memory', '') for mem in user_memories[:3]])
+            # Note: Intentionally NOT using user_memories or planning_history
+            # Each day should be treated fresh without assumptions from previous days
             
             # Day-Planning Style Card Implementation
             system_prompt = f"""You are a Day-Planning Coach following the exact Day-Planning Style Card specifications.
 
 STYLE CARD REQUIREMENTS:
-• Purpose: Invite user to outline today's tasks with one clear action
-• Length: 20-30 words, two sentences exactly
-• Questions: 0-1 maximum; if used, must be final sentence
+• Purpose: Ask user to outline today's tasks - NO assumptions about their work/projects
+• Length: 20-30 words, two sentences exactly  
+• Questions: exactly 1 question as the final sentence
 • Tone: warm, plain, practical; NO exclamation marks
 • Must include: one action verb (write/list/jot/type/plan/organize/note/outline)
-• Structure: 1) Short orienting sentence 2) CTA sentence (optionally as question)
+• Structure: 1) Short orienting sentence 2) Simple question with action verb
+
+CRITICAL RULES:
+• DO NOT assume or state specific tasks, projects, or work ("app development", "presentations")
+• DO NOT guess context from previous conversations
+• ONLY invite them to share what they're planning - let THEM tell you
+• Keep the question open-ended and task-neutral
 
 OPENER POOL (rotate daily):
 "Now that the morning's rolling", "Let's set you up for today", "Quick plan for today", 
 "To make today smoother", "Before you dive in", "Let's give today some structure", 
 "A simple start works best", "For a clear head"
 
-BANNED ELEMENTS:
-• Hype words: amazing, crush it, incredible, fantastic
-• Therapy clichés, vague filler like "stay positive"
-• Exclamation marks, second task lists in same turn
-
 EXAMPLES TO MATCH:
-"Let's set you up for today. Jot three priorities you'll feel good finishing before evening."
-"Quick plan for today. List the tasks that matter most—work, personal, or self-care."
+"Let's set you up for today. What would you like to accomplish?"
+"Quick plan for today. What tasks are you focusing on?"
+"Now that the morning's rolling. What's on your agenda today?"
 
 USER CONTEXT:
-- Recent planning: {planning_history[:100] if planning_history else 'New user'}
+- Today: Fresh new day with no assumptions about what they'll work on
 - Goals: {user_context.get('personal_goals', 'general productivity')}
 {variety_addon}
 
@@ -1074,6 +1106,10 @@ Generate exactly two sentences (20-30 words) following the Day-Planning Style Ca
             # Store pattern for future anti-repetition
             if self.pattern_tracker:
                 await self.pattern_tracker.store_pattern(user_id, 'day_planning', planning)
+            
+            # Set pending intent to capture user's plan response
+            today_date = datetime.now().strftime('%Y-%m-%d')
+            await self.supabase.set_pending_intent(user_id, 'capture_day_plan', today_date)
             
             # Store in mem0
             await self.mem0_service.add_memory(

@@ -407,6 +407,54 @@ async def handle_coaching_message_with_subscription(
             message_id
         )
         
+        # Check for pending intent to capture structured data (e.g., daily plans)
+        preferences = await supabase_service.get_user_preferences(subscription["id"])
+        pending_intent = preferences.get("pending_intent")
+        
+        if pending_intent and isinstance(pending_intent, dict):
+            intent = pending_intent.get("intent")
+            intent_date = pending_intent.get("date")
+            
+            if intent == "capture_day_plan":
+                # Parse user's plan response into structured items
+                plan_items = supabase_service.parse_daily_plan_items(message_text)
+                
+                if plan_items:
+                    # Store the daily plan
+                    await supabase_service.store_daily_plan(
+                        user_id=subscription["id"],
+                        plan_date=intent_date,
+                        items=plan_items,
+                        raw_text=message_text
+                    )
+                    
+                    # Clear the pending intent
+                    await supabase_service.clear_pending_intent(subscription["id"])
+                    
+                    logger.info(f"Captured daily plan for user {subscription['id']}: {len(plan_items)} items")
+                else:
+                    logger.info(f"No valid plan items parsed from user message: {message_text}")
+                    
+            elif intent == "capture_task_completion":
+                # Parse which tasks were completed (e.g., "1,3" or "1 and 3" or "just 2")
+                completed_items = supabase_service.parse_task_completion(message_text)
+                
+                if completed_items:
+                    # Update daily plan with completion status
+                    await supabase_service.update_task_completion(
+                        user_id=subscription["id"],
+                        plan_date=intent_date,
+                        completed_items=completed_items,
+                        raw_response=message_text
+                    )
+                    
+                    # Clear the pending intent
+                    await supabase_service.clear_pending_intent(subscription["id"])
+                    
+                    logger.info(f"Captured task completion for user {subscription['id']}: {completed_items}")
+                else:
+                    logger.info(f"No valid completion items parsed from user message: {message_text}")
+        
         # Dispatch AI response generation to background task (prevents webhook timeout)
         from worker.tasks.ai_coach_async import send_ai_coach_response_async
         task = send_ai_coach_response_async.delay(
