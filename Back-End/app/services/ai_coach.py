@@ -70,9 +70,9 @@ class AICoachService:
             return welcome_msg
             
         except Exception as e:
-            logger.exception("ai_welcome_message_error",
-                            subscription_id=subscription.get("id"),
-                            error=str(e))
+            logger.error("ai_welcome_message_error",
+                        subscription_id=subscription.get("id"),
+                        error=str(e))
             # Use context-aware fallback from personality system
             fallback_responses = core_personality.get_fallback_responses(ConversationContext.ACTIVATION)
             return fallback_responses[0]  # Use first fallback response
@@ -194,10 +194,10 @@ Respond naturally by providing value first—explain, suggest, or reflect—befo
             
         except Exception as e:
             response_time = (datetime.now() - start_time).total_seconds()
-            logger.exception("ai_response_error",
-                            user_id=user_id,
-                            response_time_seconds=response_time,
-                            error=str(e))
+            logger.error("ai_response_error",
+                        user_id=user_id,
+                        response_time_seconds=response_time,
+                        error=str(e))
             
             # Provide contextual fallback based on message sentiment
             return self._get_fallback_response(message)
@@ -296,9 +296,9 @@ Generate a single, concise morning affirmation that feels personal and resonates
             return affirmation
             
         except Exception as e:
-            logger.exception("ai_daily_affirmation_error",
-                            user_id=user_id,
-                            error=str(e))
+            logger.error("ai_daily_affirmation_error",
+                        user_id=user_id,
+                        error=str(e))
             # Simple, effective fallback
             fallbacks = [
                 "You are capable, confident, and ready for today.",
@@ -400,9 +400,9 @@ Generate 1-3 sentences (22-38 words) following the Night-Gratitude Style Card.""
             return prompt
             
         except Exception as e:
-            logger.exception("ai_gratitude_prompt_error",
-                            user_id=user_id,
-                            error=str(e))
+            logger.error("ai_gratitude_prompt_error",
+                        user_id=user_id,
+                        error=str(e))
             # Night-Gratitude Style Card compliant fallbacks
             fallbacks = [
                 "As you settle in tonight, notice one small comfort from today—a kind word, warm light, or steady breath.",
@@ -512,9 +512,9 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
             return checkin_message
             
         except Exception as e:
-            logger.exception("ai_accountability_checkin_error",
-                            user_id=user_id,
-                            error=str(e))
+            logger.error("ai_accountability_checkin_error",
+                        user_id=user_id,
+                        error=str(e))
             # Varied fallbacks based on system prompt examples
             fallbacks = [
                 "How did today's goals go? Which ones did you finish?",
@@ -889,9 +889,9 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
                 metadata=metadata
             )
         except Exception as e:
-            logger.exception("ai_memory_storage_error",
-                            user_id=user_id,
-                            error=str(e))
+            logger.error("ai_memory_storage_error",
+                        user_id=user_id,
+                        error=str(e))
             # Continue without storing - don't break the conversation flow
 
     async def generate_weekly_reflection(self, user_id: str, user_context: Dict[str, Any]) -> str:
@@ -1021,9 +1021,9 @@ Generate an encouraging first-week planning prompt that helps them set intention
             return reflection
             
         except Exception as e:
-            logger.exception("ai_weekly_reflection_error",
-                            user_id=user_id,
-                            error=str(e))
+            logger.error("ai_weekly_reflection_error",
+                        user_id=user_id,
+                        error=str(e))
             # Varied fallbacks for different user types
             fallbacks = [
                 "Time for your first weekly check-in. What do you want to focus on this week?",
@@ -1114,9 +1114,9 @@ Generate exactly two sentences (20-30 words) following the Day-Planning Style Ca
             return planning
             
         except Exception as e:
-            logger.exception("ai_day_planning_error",
-                            user_id=user_id,
-                            error=str(e))
+            logger.error("ai_day_planning_error",
+                        user_id=user_id,
+                        error=str(e))
             # Varied fallbacks based on system prompt examples
             fallbacks = [
                 "Let's set you up for today. Jot three priorities you'll feel good finishing.",
@@ -1200,9 +1200,9 @@ Generate a single, energizing midday affirmation that acknowledges progress and 
             return affirmation
             
         except Exception as e:
-            logger.exception("ai_midday_affirmation_error",
-                            user_id=user_id,
-                            error=str(e))
+            logger.error("ai_midday_affirmation_error",
+                        user_id=user_id,
+                        error=str(e))
             # Varied fallbacks based on system prompt examples
             fallbacks = [
                 "I am proud of what I've accomplished so far today.",
@@ -1286,9 +1286,9 @@ Generate a single, soothing evening affirmation that helps them release today an
             return affirmation
             
         except Exception as e:
-            logger.exception("ai_evening_affirmation_error",
-                            user_id=user_id,
-                            error=str(e))
+            logger.error("ai_evening_affirmation_error",
+                        user_id=user_id,
+                        error=str(e))
             # Varied calming fallbacks based on system prompt examples
             fallbacks = [
                 "I did my best today, and that is enough.",
