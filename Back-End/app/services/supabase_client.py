@@ -1156,12 +1156,13 @@ class SupabaseService:
             if m24:
                 return f"{int(m24.group(1)):02d}:{int(m24.group(2)):02d}"
 
-            # 12-hour variants: 'h', 'h:mm', optional space, optional a|am|p|pm
-            m12 = re.fullmatch(r'(\d{1,2})(?::?([0-5]\d))?\s*(a|am|p|pm)?', s)
+            # 12-hour variants: 'h', 'h:mm', 'h:mm:ss', optional space, optional a|am|p|pm
+            m12 = re.fullmatch(r'(\d{1,2})(?::([0-5]\d))?(?::([0-5]\d))?\s*(a|am|p|pm)?', s)
             if m12:
                 h = int(m12.group(1))
                 m = int(m12.group(2) or 0)
-                suf = (m12.group(3) or "").lower()
+                # Skip seconds (group 3) for time calculation
+                suf = (m12.group(4) or "").lower()
 
                 if suf:  # 12h with am/pm
                     if not (1 <= h <= 12):
