@@ -486,10 +486,45 @@ async def handle_coaching_message_with_subscription(
                         raw_response=message_text
                     )
                     
+                    # Get daily plan with goals for intelligent response
+                    daily_plan = await supabase_service.get_daily_plan_for_date(subscription["id"], intent_date)
+                    
+                    # Generate goal completion response with follow-up questions
+                    user_context = {
+                        "personal_goals": subscription.get("personal_goals", {}),
+                        "communication_style": subscription.get("communication_style", {}),
+                        "timezone": subscription.get("current_timezone", "UTC")
+                    }
+                    
+                    completion_response = await ai_coach_service.generate_goal_completion_response(
+                        user_id=subscription["id"],
+                        daily_plan=daily_plan,
+                        completed_items=completed_items,
+                        raw_response=message_text,
+                        user_context=user_context
+                    )
+                    
+                    # Send completion response immediately
+                    await whatsapp_service.send_message(
+                        phone_number=subscription["wa_id"],
+                        message=completion_response
+                    )
+                    
+                    # Store completion response in conversation log
+                    await supabase_service.log_conversation(
+                        subscriber_id=subscription["id"],
+                        content=completion_response,
+                        message_type="assistant",
+                        context_used={"type": "goal_completion_response", "completed_count": len(completed_items), "total_goals": len(daily_plan.get('items', []))}
+                    )
+                    
                     # Clear the pending intent
                     await supabase_service.clear_pending_intent(subscription["id"])
                     
-                    logger.info(f"Captured task completion for user {subscription['id']}: {completed_items}")
+                    logger.info(f"Captured task completion for user {subscription['id']}: {completed_items}, sent intelligent follow-up")
+                    
+                    # Don't process further (completion response was sent)
+                    return create_response("Goal completion response sent")
                 else:
                     logger.info(f"No valid completion items parsed from user message: {message_text}")
         

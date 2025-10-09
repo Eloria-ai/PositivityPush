@@ -424,16 +424,28 @@ Generate 1-3 sentences (22-38 words) following the Night-Gratitude Style Card.""
             # Get user's memories for personalization
             user_memories = await self.mem0_service.get_memories(user_id)
             
-            # Get today's actual daily plan from database (instead of guessing from memory)
+            # Get today's actual daily plan with extracted goals from database
             today_date = datetime.now().strftime('%Y-%m-%d')
             daily_plan = await self.supabase.get_daily_plan_for_date(user_id, today_date)
             
-            # Format planned items for the prompt
+            # Format planned items and goals for the prompt
             morning_plan_text = "General goals and intentions"
+            goal_context = {}
+            
             if daily_plan and daily_plan.get('items'):
                 planned_items = daily_plan['items'][:5]  # Limit to 5 items for message length
                 numbered_items = [f"{i+1}) {item}" for i, item in enumerate(planned_items)]
-                morning_plan_text = "You planned: " + ", ".join(numbered_items)
+                morning_plan_text = "Your goals for today: " + ", ".join(numbered_items)
+                
+                # Include extracted goal analysis if available
+                extracted_goals = daily_plan.get('extracted_goals', {})
+                if extracted_goals:
+                    goal_context = {
+                        "categories": extracted_goals.get("categories", {}),
+                        "insights": extracted_goals.get("insights", []),
+                        "goal_count": len(extracted_goals.get("goals", []))
+                    }
+                    
             elif daily_plan and daily_plan.get('raw_text'):
                 morning_plan_text = f"You planned: {daily_plan['raw_text'][:100]}"
             
@@ -468,6 +480,7 @@ Generate only a gentle check-in that recaps morning plan and asks which tasks we
 USER CONTEXT:
 - Morning plan: {morning_plan_text}  
 - Goals: {user_context.get('personal_goals', 'personal growth')}
+- Goal focus: {', '.join(goal_context.get('categories', {}).keys()) if goal_context.get('categories') else 'balanced planning'}
 - Communication style: {personalization['tone_preference']}
 - Recent context: {user_memories[0].get('memory', 'New user') if user_memories else 'New user'}{variety_addon}
 
@@ -1281,6 +1294,130 @@ Generate a personalized acknowledgment following these guidelines."""
             ]
             import random
             return random.choice(fallbacks)
+
+    async def generate_goal_completion_response(self, user_id: str, daily_plan: Dict[str, Any], completed_items: List[int], raw_response: str, user_context: Dict[str, Any]) -> str:
+        """Generate intelligent response to goal completion with follow-up questions for incomplete goals"""
+        try:
+            if not daily_plan or not daily_plan.get('items'):
+                return "Thanks for the update! Keep up the great work."
+            
+            plan_items = daily_plan['items']
+            extracted_goals = daily_plan.get('extracted_goals', {})
+            goal_categories = extracted_goals.get('categories', {})
+            goal_insights = extracted_goals.get('insights', [])
+            
+            # Analyze completion status
+            total_goals = len(plan_items)
+            completed_count = len(completed_items)
+            completion_rate = completed_count / total_goals if total_goals > 0 else 0
+            
+            # Create completion analysis
+            completed_goals = []
+            incomplete_goals = []
+            
+            for i, goal in enumerate(plan_items):
+                goal_number = i + 1
+                if goal_number in completed_items:
+                    completed_goals.append({"number": goal_number, "goal": goal})
+                else:
+                    incomplete_goals.append({"number": goal_number, "goal": goal})
+            
+            # Get user memories for personalization
+            user_memories = await self.mem0_service.get_memories(user_id)
+            memory_context = user_memories[0].get('memory', '') if user_memories else ''
+            
+            # Determine dominant incomplete category for targeted follow-up
+            incomplete_categories = {}
+            if incomplete_goals and extracted_goals.get('goals'):
+                for extracted_goal in extracted_goals['goals']:
+                    original_item = extracted_goal.get('original_item', '').lower()
+                    category = extracted_goal.get('category', 'personal')
+                    
+                    # Check if this goal is incomplete
+                    for incomplete in incomplete_goals:
+                        if original_item in incomplete['goal'].lower() or incomplete['goal'].lower() in original_item:
+                            incomplete_categories[category] = incomplete_categories.get(category, 0) + 1
+                            break
+            
+            dominant_incomplete_category = max(incomplete_categories.items(), key=lambda x: x[1])[0] if incomplete_categories else None
+            
+            system_prompt = f"""You are a supportive AI coach responding to goal completion updates.
+
+COMPLETION STATUS:
+- Total goals: {total_goals}
+- Completed: {completed_count} ({completion_rate:.0%})
+- Completed goals: {[f"{g['number']}. {g['goal']}" for g in completed_goals]}
+- Incomplete goals: {[f"{g['number']}. {g['goal']}" for g in incomplete_goals]}
+
+GOAL ANALYSIS:
+- Goal categories: {goal_categories}
+- Main incomplete category: {dominant_incomplete_category or 'mixed'}
+- Goal insights: {', '.join(goal_insights[:2]) if goal_insights else 'balanced planning'}
+
+USER CONTEXT:
+- Memory context: {memory_context[:100] if memory_context else 'New interaction'}
+- Personal goals: {user_context.get('personal_goals', {})}
+
+RESPONSE REQUIREMENTS:
+• Length: 35-50 words total
+• Structure: 1) Acknowledge completed goals positively 2) Ask ONE follow-up question about incomplete goals
+• Tone: Supportive, curious, non-judgmental
+• Focus: Understanding barriers, not blame
+
+FOLLOW-UP QUESTION GUIDELINES:
+- If {completion_rate:.0%} completion: {"Great job! What helped you stay on track?" if completion_rate >= 0.8 else "Nice progress! What got in the way of the others?" if completion_rate >= 0.5 else "What made some goals harder to tackle today?"}
+- For {dominant_incomplete_category} goals: Include category-specific context
+- Avoid: "What prevented you", "Why didn't you", blame-oriented language
+- Use: "What got in the way", "What made it challenging", solution-oriented language
+
+RESPONSE EXAMPLES:
+- High completion: "Awesome work on [completed goals]! What helped you stay so focused today?"
+- Mixed completion: "Great job on [completed goals]! What made [incomplete category] goals trickier today?"
+- Low completion: "I see you tackled [completed goals]. What made the day more challenging than expected?"
+
+Generate a supportive response with ONE thoughtful follow-up question."""
+
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"User completed goals: {completed_items} out of {list(range(1, total_goals + 1))}. Raw response: '{raw_response}'"}
+                ],
+                max_tokens=150,
+                temperature=0.7
+            )
+            
+            completion_response = response.choices[0].message.content.strip()
+            
+            # Clean up formatting
+            completion_response = completion_response.replace('"', '').replace("'", "'")
+            
+            # Store insights in mem0 for future personalization
+            insights = []
+            if completion_rate >= 0.8:
+                insights.append(f"User has high goal completion rate ({completion_rate:.0%})")
+            elif completion_rate <= 0.3:
+                insights.append(f"User struggles with goal completion ({completion_rate:.0%}) - may need simpler goals")
+            
+            if dominant_incomplete_category:
+                insights.append(f"User tends to struggle with {dominant_incomplete_category} goals")
+            
+            if insights:
+                await self.mem0_service.add_memory(
+                    messages=[{"role": "system", "content": f"Goal completion insights: {', '.join(insights)}"}],
+                    user_id=user_id,
+                    metadata={"interaction_type": "goal_completion_analysis", "date": datetime.now().isoformat()}
+                )
+            
+            return completion_response
+            
+        except Exception as e:
+            logger.error(f"Error generating goal completion response: {e}")
+            # Fallback responses based on completion rate
+            if completed_items:
+                return f"Nice work completing {len(completed_items)} goals! What made the other ones challenging today?"
+            else:
+                return "Thanks for the update! What made today's goals trickier than expected?"
 
     async def generate_midday_affirmation(self, user_id: str, user_context: Dict[str, Any]) -> str:
         """Generate personalized midday affirmation following system prompt specifications"""
