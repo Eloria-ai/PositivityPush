@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS daily_plans (
     plan_date DATE NOT NULL,
     items JSONB DEFAULT '[]', -- Structured array of plan items
     raw_text TEXT, -- Original user response for reference
+    extracted_goals JSONB DEFAULT NULL, -- AI-extracted goals analysis with categories and insights
     completion_status JSONB DEFAULT NULL, -- Array of {item, completed, item_number}
     completion_response TEXT, -- User's raw completion response
     completed_at TIMESTAMP WITH TIME ZONE DEFAULT NULL, -- When completion was recorded

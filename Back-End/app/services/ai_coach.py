@@ -906,7 +906,7 @@ Generate ONLY Step 1: gentle check-in with morning plan recap + single completio
             week_start = monday_this_week.strftime('%Y-%m-%d')
             
             # Get or create weekly goals for this week
-            weekly_goals = await self.supabase.get_weekly_goals_for_week(user_id, week_start)
+            weekly_goals = await self.supabase.get_weekly_goals(user_id, week_start)
             
             # Check if this is a first-time user (no past week data)
             has_past_week_data = False
@@ -1123,6 +1123,161 @@ Generate exactly two sentences (20-30 words) following the Day-Planning Style Ca
                 "Quick plan for today. List the tasks that matter most to you.",
                 "Before you dive in, give the day structure. Write your top three goals.",
                 "To make today smoother, outline what needs your attention most."
+            ]
+            import random
+            return random.choice(fallbacks)
+
+    async def extract_goals_from_daily_plan(self, plan_items: List[str], user_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract and categorize goals from daily plan items"""
+        try:
+            if not plan_items:
+                return {"goals": [], "categories": {}, "recurring_patterns": []}
+            
+            # Prepare items for AI analysis
+            items_text = "\n".join([f"{i+1}. {item}" for i, item in enumerate(plan_items)])
+            
+            system_prompt = f"""You are a goal analysis expert. Analyze the user's daily plan items to extract meaningful goals and patterns.
+
+USER'S DAILY PLAN ITEMS:
+{items_text}
+
+ANALYSIS TASKS:
+1. GOAL EXTRACTION: Identify the underlying goals/objectives behind each task
+2. CATEGORIZATION: Classify goals into categories (health, work, personal, learning, social, etc.)
+3. PATTERN RECOGNITION: Identify recurring vs one-time goals
+4. GOAL REFINEMENT: Convert vague tasks into clear, actionable goals
+
+RESPONSE FORMAT (JSON):
+{{
+    "goals": [
+        {{
+            "original_item": "go to gym",
+            "extracted_goal": "maintain physical fitness", 
+            "category": "health",
+            "type": "recurring",
+            "priority": "high"
+        }}
+    ],
+    "categories": {{
+        "health": 1,
+        "work": 2,
+        "personal": 1
+    }},
+    "insights": [
+        "User focuses on health and work balance",
+        "Strong commitment to family relationships"
+    ]
+}}
+
+CATEGORIZATION GUIDELINES:
+- health: fitness, exercise, medical, wellness, nutrition
+- work: projects, meetings, deadlines, professional tasks
+- personal: self-care, hobbies, organization, household
+- social: family, friends, relationships, community
+- learning: study, skills, reading, courses
+- financial: budgeting, investments, purchases
+- creative: art, writing, music, design
+
+Return ONLY valid JSON."""
+
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Analyze these daily plan items: {items_text}"}
+                ],
+                max_tokens=800,
+                temperature=0.3  # Lower temperature for consistent analysis
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            # Parse JSON response
+            import json
+            goal_analysis = json.loads(result)
+            
+            # Validate structure
+            if not isinstance(goal_analysis.get("goals"), list):
+                goal_analysis["goals"] = []
+            if not isinstance(goal_analysis.get("categories"), dict):
+                goal_analysis["categories"] = {}
+            if not isinstance(goal_analysis.get("insights"), list):
+                goal_analysis["insights"] = []
+            
+            return goal_analysis
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse goal analysis JSON: {e}")
+            return {"goals": [], "categories": {}, "insights": []}
+        except Exception as e:
+            logger.error(f"Error extracting goals from daily plan: {e}")
+            return {"goals": [], "categories": {}, "insights": []}
+
+    async def generate_goal_acknowledgment(self, plan_items: List[str], goal_analysis: Dict[str, Any], user_context: Dict[str, Any]) -> str:
+        """Generate a personalized acknowledgment of the user's daily goals"""
+        try:
+            if not plan_items:
+                return "I'll check in with you later to see how your day goes!"
+            
+            # Prepare goal context for acknowledgment
+            goals_summary = []
+            categories = goal_analysis.get("categories", {})
+            insights = goal_analysis.get("insights", [])
+            
+            # Create goal summary
+            for i, item in enumerate(plan_items[:3]):  # Limit to top 3 for brevity
+                goals_summary.append(f"{i+1}. {item.title()}")
+            
+            # Determine dominant category for personalized response
+            dominant_category = max(categories.items(), key=lambda x: x[1])[0] if categories else "personal"
+            
+            system_prompt = f"""You are a supportive AI coach acknowledging the user's daily goals.
+
+USER'S GOALS FOR TODAY:
+{chr(10).join(goals_summary)}
+
+GOAL ANALYSIS:
+- Dominant focus: {dominant_category} 
+- Goal insights: {', '.join(insights[:2]) if insights else 'balanced daily planning'}
+
+ACKNOWLEDGMENT REQUIREMENTS:
+• Length: 25-35 words, exactly 2 sentences
+• Tone: supportive, encouraging, personal (but not overly enthusiastic)
+• Structure: 1) Acknowledge their goals 2) Express confidence/support
+• Include: reference to their goal focus ({dominant_category})
+• NO exclamation marks, keep tone warm but measured
+
+RESPONSE TEMPLATES TO VARY:
+- "I've noted your [X] goals for today. I'll check in later to see how they went."
+- "Your [X] focused plan looks solid. Looking forward to hearing how it unfolds."
+- "Recorded your [X] priorities for today. I'll be curious about your progress later."
+
+Generate a personalized acknowledgment following these guidelines."""
+
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Generate acknowledgment for these goals: {', '.join(plan_items)}"}
+                ],
+                max_tokens=150,
+                temperature=0.7
+            )
+            
+            acknowledgment = response.choices[0].message.content.strip()
+            
+            # Clean up formatting
+            acknowledgment = acknowledgment.replace('"', '').replace("'", "'")
+            
+            return acknowledgment
+            
+        except Exception as e:
+            logger.error(f"Error generating goal acknowledgment: {e}")
+            # Fallback acknowledgments
+            fallbacks = [
+                f"I've noted your {len(plan_items)} goals for today. I'll check in later to see how they went.",
+                f"Your plan looks solid with {len(plan_items)} priorities. Looking forward to hearing how it unfolds.",
+                f"Recorded your goals for today. I'll be curious about your progress later."
             ]
             import random
             return random.choice(fallbacks)

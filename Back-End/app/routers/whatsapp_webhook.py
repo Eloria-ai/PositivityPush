@@ -420,18 +420,56 @@ async def handle_coaching_message_with_subscription(
                 plan_items = supabase_service.parse_daily_plan_items(message_text)
                 
                 if plan_items:
-                    # Store the daily plan
+                    # Extract goals from daily plan items using AI coach
+                    user_context = {
+                        "personal_goals": subscription.get("personal_goals", {}),
+                        "communication_style": subscription.get("communication_style", {}),
+                        "timezone": subscription.get("current_timezone", "UTC")
+                    }
+                    
+                    # Extract and categorize goals
+                    goal_analysis = await ai_coach_service.extract_goals_from_daily_plan(
+                        plan_items=plan_items,
+                        user_context=user_context
+                    )
+                    
+                    # Store the daily plan with extracted goals
                     await supabase_service.store_daily_plan(
                         user_id=subscription["id"],
                         plan_date=intent_date,
                         items=plan_items,
-                        raw_text=message_text
+                        raw_text=message_text,
+                        extracted_goals=goal_analysis
+                    )
+                    
+                    # Generate goal acknowledgment response
+                    acknowledgment = await ai_coach_service.generate_goal_acknowledgment(
+                        plan_items=plan_items,
+                        goal_analysis=goal_analysis,
+                        user_context=user_context
+                    )
+                    
+                    # Send acknowledgment immediately (don't wait for async task)
+                    await whatsapp_service.send_message(
+                        phone_number=subscription["wa_id"],
+                        message=acknowledgment
+                    )
+                    
+                    # Store acknowledgment in conversation log
+                    await supabase_service.log_conversation(
+                        subscriber_id=subscription["id"],
+                        content=acknowledgment,
+                        message_type="assistant",
+                        context_used={"type": "goal_acknowledgment", "goals_count": len(plan_items), "categories": goal_analysis.get("categories", {})}
                     )
                     
                     # Clear the pending intent
                     await supabase_service.clear_pending_intent(subscription["id"])
                     
-                    logger.info(f"Captured daily plan for user {subscription['id']}: {len(plan_items)} items")
+                    logger.info(f"Captured daily plan for user {subscription['id']}: {len(plan_items)} items, {len(goal_analysis.get('goals', []))} goals extracted")
+                    
+                    # Don't process further (acknowledgment was sent)
+                    return create_response("Goal acknowledgment sent")
                 else:
                     logger.info(f"No valid plan items parsed from user message: {message_text}")
                     

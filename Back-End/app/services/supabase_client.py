@@ -186,18 +186,24 @@ class SupabaseService:
             logger.error(f"Error clearing pending intent for user {user_id}: {e}")
             return False
     
-    async def store_daily_plan(self, user_id: str, plan_date: str, items: List[str], raw_text: str) -> bool:
-        """Store user's daily plan for context-aware check-ins"""
+    async def store_daily_plan(self, user_id: str, plan_date: str, items: List[str], raw_text: str, extracted_goals: Dict[str, Any] = None) -> bool:
+        """Store user's daily plan with optional goal analysis for context-aware check-ins"""
         try:
-            # Use upsert to handle duplicates (replace if same date)
-            result = self.client.table("daily_plans").upsert({
+            plan_data = {
                 "subscriber_id": user_id,
                 "plan_date": plan_date,
                 "items": items,
                 "raw_text": raw_text
-            }).execute()
+            }
             
-            logger.info(f"Stored daily plan for user {user_id} on {plan_date}: {len(items)} items")
+            # Add extracted goals if provided
+            if extracted_goals:
+                plan_data["extracted_goals"] = extracted_goals
+            
+            # Use upsert to handle duplicates (replace if same date)
+            result = self.client.table("daily_plans").upsert(plan_data).execute()
+            
+            logger.info(f"Stored daily plan for user {user_id} on {plan_date}: {len(items)} items, goals: {bool(extracted_goals)}")
             return True
         except Exception as e:
             logger.error(f"Error storing daily plan for user {user_id}: {e}")
