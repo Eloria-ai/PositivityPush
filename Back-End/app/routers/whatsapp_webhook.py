@@ -407,11 +407,10 @@ async def handle_coaching_message_with_subscription(
             message_id
         )
         
-        # Check for pending intent to capture structured data (e.g., daily plans)
-        preferences = await supabase_service.get_user_preferences(subscription["id"])
-        pending_intent = preferences.get("pending_intent")
+        # Check for pending intent to capture structured data (e.g., daily plans) - queue-aware
+        pending_intent = await supabase_service.get_next_pending_intent(subscription["id"])
         
-        if pending_intent and isinstance(pending_intent, dict):
+        if pending_intent:
             intent = pending_intent.get("intent")
             intent_date = pending_intent.get("date")
             
@@ -463,8 +462,8 @@ async def handle_coaching_message_with_subscription(
                         context_used={"type": "goal_acknowledgment", "goals_count": len(plan_items), "categories": goal_analysis.get("categories", {})}
                     )
                     
-                    # Clear the pending intent
-                    await supabase_service.clear_pending_intent(subscription["id"])
+                    # Clear the specific pending intent
+                    await supabase_service.clear_pending_intent(subscription["id"], "capture_day_plan")
                     
                     logger.info(f"Captured daily plan for user {subscription['id']}: {len(plan_items)} items, {len(goal_analysis.get('goals', []))} goals extracted")
                     
@@ -518,8 +517,8 @@ async def handle_coaching_message_with_subscription(
                         context_used={"type": "goal_completion_response", "completed_count": len(completed_items), "total_goals": len(daily_plan.get('items', []))}
                     )
                     
-                    # Clear the pending intent
-                    await supabase_service.clear_pending_intent(subscription["id"])
+                    # Clear the specific pending intent
+                    await supabase_service.clear_pending_intent(subscription["id"], "capture_task_completion")
                     
                     logger.info(f"Captured task completion for user {subscription['id']}: {completed_items}, sent intelligent follow-up")
                     

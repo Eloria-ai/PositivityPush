@@ -170,18 +170,119 @@ class SupabaseService:
     
     # Daily Plans Management (for context-aware messaging)
     async def set_pending_intent(self, user_id: str, intent: str, date: str = None) -> bool:
-        """Set pending intent for capturing user responses (e.g., after day planning prompt)"""
+        """Set pending intent for capturing user responses with queue support for multiple intents"""
         try:
-            pending_intent = {"intent": intent, "date": date, "timestamp": datetime.utcnow().isoformat()}
-            return await self.set_preference_value(user_id, "pending_intent", pending_intent)
+            # Get current preferences to check for existing intents
+            current_prefs = await self.get_user_preferences(user_id)
+            
+            # Define intent priorities (higher number = higher priority)
+            intent_priorities = {
+                'capture_day_plan': 10,           # Highest priority - user's daily goals
+                'capture_task_completion': 9,     # High priority - accountability data
+                'capture_weekly_reflection': 8,   # Medium priority - weekly planning
+                'capture_gratitude': 5,          # Lower priority - gratitude responses
+                'capture_goal_progress': 7       # Medium priority - goal progress
+            }
+            
+            new_intent = {
+                "intent": intent, 
+                "date": date, 
+                "timestamp": datetime.utcnow().isoformat(),
+                "priority": intent_priorities.get(intent, 1)
+            }
+            
+            # Get existing pending intents (convert from single to queue if needed)
+            existing_intent = current_prefs.get("pending_intent")
+            pending_intents = []
+            
+            if existing_intent:
+                if isinstance(existing_intent, dict):
+                    if existing_intent.get("intent"):  # Single intent format
+                        # Convert single intent to queue format
+                        existing_intent["priority"] = intent_priorities.get(existing_intent.get("intent"), 1)
+                        pending_intents = [existing_intent]
+                    else:  # Already queue format
+                        pending_intents = existing_intent.get("queue", [])
+                elif isinstance(existing_intent, list):  # Direct queue
+                    pending_intents = existing_intent
+            
+            # Add new intent to queue if not duplicate
+            existing_intents = [p.get("intent") for p in pending_intents]
+            if intent not in existing_intents:
+                pending_intents.append(new_intent)
+            
+            # Sort by priority (highest first) and timestamp (oldest first for same priority)
+            pending_intents.sort(key=lambda x: (-x.get("priority", 1), x.get("timestamp", "")))
+            
+            # Store as queue format
+            intent_queue = {"queue": pending_intents, "updated": datetime.utcnow().isoformat()}
+            
+            logger.info(f"Set pending intent '{intent}' for user {user_id}, queue length: {len(pending_intents)}")
+            return await self.set_preference_value(user_id, "pending_intent", intent_queue)
+            
         except Exception as e:
             logger.error(f"Error setting pending intent for user {user_id}: {e}")
             return False
     
-    async def clear_pending_intent(self, user_id: str) -> bool:
-        """Clear pending intent after capturing user response"""
+    async def get_next_pending_intent(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get the highest priority pending intent without removing it"""
         try:
+            current_prefs = await self.get_user_preferences(user_id)
+            pending_intent = current_prefs.get("pending_intent")
+            
+            if not pending_intent:
+                return None
+            
+            # Handle both old single format and new queue format
+            if isinstance(pending_intent, dict):
+                if pending_intent.get("intent"):  # Old single format
+                    return pending_intent
+                elif pending_intent.get("queue"):  # New queue format
+                    queue = pending_intent.get("queue", [])
+                    return queue[0] if queue else None
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error getting next pending intent for user {user_id}: {e}")
+            return None
+
+    async def clear_pending_intent(self, user_id: str, specific_intent: str = None) -> bool:
+        """Clear pending intent after capturing user response. If specific_intent provided, only clear that one."""
+        try:
+            current_prefs = await self.get_user_preferences(user_id)
+            pending_intent = current_prefs.get("pending_intent")
+            
+            if not pending_intent:
+                return True  # Already clear
+            
+            # Handle old single format
+            if isinstance(pending_intent, dict) and pending_intent.get("intent"):
+                if specific_intent is None or pending_intent.get("intent") == specific_intent:
+                    return await self.set_preference_value(user_id, "pending_intent", None)
+                return True  # Don't clear if not matching
+            
+            # Handle new queue format
+            if isinstance(pending_intent, dict) and pending_intent.get("queue"):
+                queue = pending_intent.get("queue", [])
+                
+                if specific_intent:
+                    # Remove specific intent from queue
+                    queue = [item for item in queue if item.get("intent") != specific_intent]
+                else:
+                    # Remove the first (highest priority) intent
+                    queue = queue[1:] if queue else []
+                
+                if queue:
+                    # Update queue with remaining intents
+                    updated_queue = {"queue": queue, "updated": datetime.utcnow().isoformat()}
+                    return await self.set_preference_value(user_id, "pending_intent", updated_queue)
+                else:
+                    # Clear completely if queue is empty
+                    return await self.set_preference_value(user_id, "pending_intent", None)
+            
+            # Fallback: clear everything
             return await self.set_preference_value(user_id, "pending_intent", None)
+            
         except Exception as e:
             logger.error(f"Error clearing pending intent for user {user_id}: {e}")
             return False
