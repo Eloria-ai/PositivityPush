@@ -25,6 +25,7 @@ class AICoachService:
     
     def __init__(self, supabase_service=None):
         self.openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.supabase = supabase_service  # CRITICAL FIX: Store supabase service
         self.mem0_service = Mem0Service()
         self.psychological_framework = PsychologicalFramework()
         self.prompt_engine = EnhancedPromptEngine()
@@ -1193,7 +1194,7 @@ CATEGORIZATION GUIDELINES:
 
 Return ONLY valid JSON."""
 
-            response = await self.client.chat.completions.create(
+            response = await self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -1267,7 +1268,7 @@ RESPONSE TEMPLATES TO VARY:
 
 Generate a personalized acknowledgment following these guidelines."""
 
-            response = await self.client.chat.completions.create(
+            response = await self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -1377,7 +1378,7 @@ RESPONSE EXAMPLES:
 
 Generate a supportive response with ONE thoughtful follow-up question."""
 
-            response = await self.client.chat.completions.create(
+            response = await self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},

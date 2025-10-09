@@ -15,6 +15,7 @@ from app.services.whatsapp_service import WhatsAppService
 from app.services.supabase_client import SupabaseService
 from app.services.onboarding_service import OnboardingService
 from app.services.timezone_service import TimezoneService
+from app.services.ai_coach import AICoachService
 from app.logging_config import get_logger
 
 # Configure structured logging
@@ -71,6 +72,7 @@ async def whatsapp_webhook(
         # Initialize services
         supabase_service = SupabaseService(db)
         whatsapp_service = WhatsAppService()
+        ai_coach_service = AICoachService(supabase_service)
         
         # Parse Twilio form data
         form_data = await request.form()
