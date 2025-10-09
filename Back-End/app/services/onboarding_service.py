@@ -1843,6 +1843,36 @@ Return ONLY JSON or empty {{}} if no time found.
             
             return f"{acknowledgment}\n\n{next_question}"
     
+    def convert_ampm_to_24h(self, time_ampm: str) -> str:
+        """Convert AM/PM format to 24-hour format, stripping seconds if present"""
+        import re
+        try:
+            if not time_ampm:
+                return time_ampm
+            
+            # Remove seconds if present: "12:08:00 PM" → "12:08 PM"
+            time_ampm = re.sub(r'(\d{1,2}:\d{2}):\d{2}(\s*[AP]M)', r'\1\2', time_ampm, flags=re.IGNORECASE)
+            
+            # Parse time like "12:08 PM" or "12:08PM"
+            match = re.match(r'(\d{1,2}):(\d{2})\s*(AM|PM)', time_ampm.strip(), re.IGNORECASE)
+            if not match:
+                return time_ampm
+            
+            hour = int(match.group(1))
+            minute = match.group(2)
+            period = match.group(3).upper()
+            
+            if period == 'AM':
+                if hour == 12:
+                    hour = 0
+            else:  # PM
+                if hour != 12:
+                    hour += 12
+            
+            return f"{hour:02d}:{minute}"
+        except:
+            return time_ampm
+
     def format_time_ampm(self, time_24h: str) -> str:
         """Convert 24-hour time to AM/PM format"""
         try:
@@ -1920,9 +1950,13 @@ Return ONLY JSON or empty {{}} if no time found.
                     if day not in valid_days:
                         return None, None
                     
-                    # LLM should return time in "HH:MM AM/PM" format - just validate and store
+                    # Convert to 24-hour format then back to standardized AM/PM format
                     if time_str and ('AM' in time_str.upper() or 'PM' in time_str.upper() or ':' in time_str):
-                        return day, time_str
+                        # Convert to 24-hour format to standardize
+                        time_24h = self.convert_ampm_to_24h(time_str)
+                        # Convert back to consistent AM/PM format (removes seconds, standardizes formatting)
+                        standardized_time = self.format_time_ampm(time_24h)
+                        return day, standardized_time
                     
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON response from OpenAI: {result}")
@@ -2087,7 +2121,10 @@ Return ONLY JSON or empty {{}} if no time found.
                 if isinstance(extracted, dict):
                     time_str = extracted.get("time")
                     if time_str and time_str != "null" and ('AM' in time_str.upper() or 'PM' in time_str.upper()):
-                        return time_str
+                        # Standardize time format (removes seconds, ensures consistent formatting)
+                        time_24h = self.convert_ampm_to_24h(time_str)
+                        standardized_time = self.format_time_ampm(time_24h)
+                        return standardized_time
                 return None
                 
             except json.JSONDecodeError:
