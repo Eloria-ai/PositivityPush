@@ -69,7 +69,7 @@ async def root():
     return {
         "message": "Positivity Push API",
         "description": "WhatsApp-based AI coaching service",
-        "version": "1.0.0",
+        "version": "1.0.3",
         "endpoints": {
             "health": "/health",
             "stripe_webhook": "/stripe/webhook", 
