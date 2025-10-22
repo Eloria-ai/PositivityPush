@@ -155,6 +155,18 @@ celery_app.conf.beat_schedule = {
         'task': 'worker.tasks.daily_messages.cleanup_old_scheduled_messages',
         'schedule': crontab(hour=2, minute=0),
     },
+    
+    # Accountability check-ins (evening at 7 PM UTC)
+    'send-accountability-checkins': {
+        'task': 'worker.tasks.daily_messages.send_accountability_checkins',
+        'schedule': crontab(hour=19, minute=0),  # 7 PM UTC daily
+    },
+    
+    # Weekly accountability summaries (Sunday at 6 PM UTC)
+    'send-weekly-accountability-summaries': {
+        'task': 'worker.tasks.daily_messages.send_weekly_accountability_summaries',
+        'schedule': crontab(day_of_week=0, hour=18, minute=0),  # Sunday 6 PM UTC
+    },
 }
 
 # Simplified queue configuration - use default queue for all tasks

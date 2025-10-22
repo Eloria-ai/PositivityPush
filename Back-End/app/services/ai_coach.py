@@ -30,6 +30,8 @@ class AICoachService:
         self.prompt_engine = EnhancedPromptEngine()
         self.pattern_tracker = PatternTracker(supabase_service) if supabase_service else None
         self.model = settings.OPENAI_MODEL
+        # ✅ FIX: Store the supabase_service properly
+        self.supabase = supabase_service
     
     async def generate_welcome_message(self, subscription: Dict[str, Any]) -> str:
         """Generate personalized welcome message for new users"""
@@ -1591,3 +1593,274 @@ Generate a single, soothing evening affirmation that helps them release today an
             ]
             import random
             return random.choice(fallbacks)
+
+    # ===== ACCOUNTABILITY & DAILY PLAN TRACKING METHODS =====
+    
+    async def summarize_daily_plan(self, user_input: str, user_id: str) -> Dict[str, Any]:
+        """Parse user's daily plan input and create structured summary with confirmation"""
+        try:
+            if not self.supabase:
+                logger.warning("No supabase service available for plan summarization")
+                return {
+                    "items": [user_input],
+                    "summary_message": f"Got it! Today you're planning: {user_input}\n\nI'll check back later to see how it went!"
+                }
+
+            # Enhanced system prompt for plan parsing
+            system_prompt = """
+You are an expert at parsing daily plans. Your task is to:
+
+1. Extract 3-5 clear, actionable items from the user's daily plan
+2. Structure them as specific, time-bound tasks when possible
+3. Include timing if mentioned by the user
+4. Make items concise but complete
+5. Return JSON with the exact format below
+
+Return JSON with this EXACT structure:
+{
+    "items": ["Specific actionable item 1", "Specific actionable item 2", "Specific actionable item 3"],
+    "summary_message": "Great! So today you're planning to:\n\n1. Specific item with timing if mentioned\n2. Second specific item\n3. Third specific item\n\nI'll check back with you later to see how everything went. Have a productive day!"
+}
+
+Guidelines:
+- Keep items specific and actionable
+- Include time/location details if user mentions them
+- Make items 1-2 sentences maximum
+- Use encouraging, supportive tone
+- Always include the follow-up promise
+"""
+
+            response = await self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Parse this daily plan: {user_input}"}
+                ],
+                max_tokens=400,
+                temperature=0.3
+            )
+            
+            try:
+                parsed_plan = json.loads(response.choices[0].message.content)
+                
+                # Validate the response structure
+                if not isinstance(parsed_plan.get("items"), list) or not parsed_plan.get("summary_message"):
+                    raise ValueError("Invalid response structure")
+                
+                # Store in database using existing method
+                today_date = datetime.now().strftime('%Y-%m-%d')
+                success = await self.supabase.store_daily_plan(
+                    user_id=user_id,
+                    plan_date=today_date,
+                    items=parsed_plan["items"],
+                    raw_text=user_input
+                )
+                
+                if success:
+                    logger.info(f"Daily plan summarized and stored for user {user_id}: {len(parsed_plan['items'])} items")
+                else:
+                    logger.warning(f"Failed to store daily plan for user {user_id}")
+                
+                return parsed_plan
+                
+            except (json.JSONDecodeError, ValueError, KeyError) as e:
+                logger.error(f"Failed to parse daily plan response: {e}")
+                # Fallback to simple parsing
+                return await self._fallback_plan_parsing(user_input, user_id)
+                
+        except Exception as e:
+            logger.error(f"Error in summarize_daily_plan: {e}")
+            return await self._fallback_plan_parsing(user_input, user_id)
+
+    async def _fallback_plan_parsing(self, user_input: str, user_id: str) -> Dict[str, Any]:
+        """Fallback plan parsing when AI fails"""
+        try:
+            # Use existing parsing method from SupabaseService
+            items = self.supabase.parse_daily_plan_items(user_input) if self.supabase else [user_input]
+            
+            # Store in database
+            today_date = datetime.now().strftime('%Y-%m-%d')
+            if self.supabase:
+                await self.supabase.store_daily_plan(
+                    user_id=user_id,
+                    plan_date=today_date,
+                    items=items,
+                    raw_text=user_input
+                )
+            
+            # Create summary message
+            if len(items) > 1:
+                items_list = "\n".join([f"{i+1}. {item}" for i, item in enumerate(items)])
+                summary_message = f"Great! So today you're planning to:\n\n{items_list}\n\nI'll check back with you later to see how everything went. Have a productive day!"
+            else:
+                summary_message = f"Got it! Today you're planning: {items[0]}\n\nI'll check back later to see how it went!"
+            
+            return {
+                "items": items,
+                "summary_message": summary_message
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in fallback plan parsing: {e}")
+            return {
+                "items": [user_input],
+                "summary_message": f"Got it! Today you're planning: {user_input}\n\nI'll check back later to see how it went!"
+            }
+
+    async def generate_accountability_checkin(self, user_id: str, date: str = None) -> str:
+        """Generate accountability check-in message based on user's plans"""
+        try:
+            if not self.supabase:
+                return "How did your day go? What went well and what was challenging?"
+            
+            if not date:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Get user's daily plan
+            daily_plan = await self.supabase.get_daily_plan_for_date(user_id, date)
+            
+            if not daily_plan or not daily_plan.get('items'):
+                return "How did your day go? What went well and what was challenging?"
+            
+            items = daily_plan['items']
+            
+            # Create personalized check-in message
+            if len(items) == 1:
+                return f"Hey! Earlier today you planned to: {items[0]}\n\nHow did it go? What went well and what was challenging?"
+            else:
+                items_list = "\n".join([f"{i+1}. {item}" for i, item in enumerate(items)])
+                return f"Hey! Earlier today you planned to:\n\n{items_list}\n\nHow did it go? What went well and what was challenging?"
+                
+        except Exception as e:
+            logger.error(f"Error generating accountability check-in: {e}")
+            return "How did your day go? What went well and what was challenging?"
+
+    async def process_accountability_response(self, user_id: str, response_text: str, date: str = None) -> str:
+        """Process user's accountability check-in response and provide coaching"""
+        try:
+            if not date:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Get original plan for context
+            daily_plan = await self.supabase.get_daily_plan_for_date(user_id, date) if self.supabase else None
+            
+            system_prompt = """
+You are an encouraging AI accountability coach analyzing a user's daily reflection.
+
+Your task:
+1. Acknowledge what they shared positively
+2. Celebrate any wins, no matter how small
+3. Show understanding for challenges without judgment
+4. Offer brief, actionable encouragement for tomorrow
+5. Keep response warm but concise (2-3 sentences max)
+
+Tone: Encouraging, understanding, forward-looking
+Avoid: Being preachy, giving too much advice, dwelling on failures
+"""
+
+            # Build context string
+            context_str = ""
+            if daily_plan and daily_plan.get('items'):
+                items_list = "\n".join([f"- {item}" for item in daily_plan['items']])
+                context_str = f"User's original plan:\n{items_list}\n\n"
+            
+            response = await self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"{context_str}User's reflection: {response_text}"}
+                ],
+                max_tokens=150,
+                temperature=0.7
+            )
+            
+            coaching_response = response.choices[0].message.content.strip()
+            
+            # Parse completion status and store (use existing method)
+            if self.supabase and daily_plan:
+                completed_items = self.supabase.parse_task_completion(response_text)
+                if completed_items:
+                    await self.supabase.update_task_completion(user_id, date, completed_items, response_text)
+            
+            # Store in conversation history
+            if self.supabase:
+                await self.supabase.log_conversation(
+                    subscriber_id=user_id,
+                    content=coaching_response,
+                    message_type="assistant",
+                    context_used={"interaction_type": "accountability_checkin", "date": date}
+                )
+            
+            return coaching_response
+            
+        except Exception as e:
+            logger.error(f"Error processing accountability response: {e}")
+            return "Thanks for sharing how your day went! Every step forward is progress. Keep up the great work! 💪"
+
+    async def generate_weekly_accountability_summary(self, user_id: str, week_start: str = None) -> str:
+        """Generate weekly accountability summary based on week's plans and completions"""
+        try:
+            if not self.supabase:
+                return "Hope you had a great week! Take some time to reflect on your wins and areas for growth."
+            
+            if not week_start:
+                # Calculate current week start (Monday)
+                today = datetime.now().date()
+                week_start = (today - timedelta(days=today.weekday())).strftime('%Y-%m-%d')
+            
+            # Get week's accountability data using existing method
+            weekly_data = await self.supabase.get_weekly_accountability_summary(user_id, week_start)
+            
+            plans = weekly_data.get('plans', [])
+            checkins = weekly_data.get('checkins', [])
+            
+            if not plans:
+                return "Hope you had a great week! Take some time to reflect on your wins and areas for growth."
+            
+            # Analyze the week's data
+            total_planned = sum(len(plan.get('items', [])) for plan in plans)
+            total_completed = 0
+            
+            for plan in plans:
+                completion_status = plan.get('completion_status', [])
+                if completion_status:
+                    total_completed += sum(1 for item in completion_status if item.get('completed', False))
+            
+            completion_rate = int((total_completed / total_planned * 100)) if total_planned > 0 else 0
+            
+            # Generate summary using AI
+            system_prompt = """
+You are a supportive accountability coach creating a weekly summary.
+
+Create an encouraging weekly reflection that:
+1. Acknowledges the user's effort and planning
+2. Celebrates their completion rate positively
+3. Identifies patterns or insights (if any)
+4. Encourages them for the upcoming week
+5. Keeps it concise and motivating (3-4 sentences max)
+
+Be genuine, encouraging, and forward-looking.
+"""
+
+            context = f"""
+This week the user planned {total_planned} tasks across {len(plans)} days.
+They completed {total_completed} tasks - that's {completion_rate}% completion rate.
+Days with plans: {len(plans)}
+Days with check-ins: {len(checkins)}
+"""
+
+            response = await self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Create a weekly summary based on: {context}"}
+                ],
+                max_tokens=200,
+                temperature=0.7
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            logger.error(f"Error generating weekly accountability summary: {e}")
+            return "Hope you had a great week! Take some time to reflect on your wins and areas for growth."

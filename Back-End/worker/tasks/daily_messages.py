@@ -330,4 +330,159 @@ def cleanup_old_scheduled_messages():
 
 # OLD IMPLEMENTATIONS REMOVED - functionality consolidated into dispatch_message
 
+# ===== ACCOUNTABILITY TASKS =====
+
+@shared_task(bind=True, max_retries=3)
+def send_accountability_checkins(self):
+    """Send accountability check-ins to users who had plans today"""
+    try:
+        log_info("Starting accountability check-ins task")
+        
+        supabase_service, ai_coach_service, whatsapp_service = get_services()
+        
+        today = datetime.now().date()
+        today_str = today.strftime('%Y-%m-%d')
+        
+        # Get users who had plans today 
+        users_with_plans = asyncio.run(get_users_with_daily_plans(supabase_service, today_str))
+        
+        sent_count = 0
+        failed_count = 0
+        
+        for user in users_with_plans:
+            try:
+                # Check if user hasn't already received a check-in today
+                if not user.get('wa_id'):
+                    continue
+                    
+                # Generate personalized check-in message
+                checkin_message = asyncio.run(
+                    ai_coach_service.generate_accountability_checkin(user['id'], today_str)
+                )
+                
+                # Send via WhatsApp
+                success = asyncio.run(whatsapp_service.send_message(
+                    to=user['wa_id'],
+                    message=checkin_message
+                ))
+                
+                if success:
+                    sent_count += 1
+                    log_info("Accountability check-in sent", user_id=user['id'])
+                    
+                    # Log the interaction
+                    asyncio.run(supabase_service.log_conversation(
+                        subscriber_id=user['id'],
+                        content=checkin_message,
+                        message_type="assistant",
+                        context_used={"interaction_type": "accountability_checkin", "date": today_str}
+                    ))
+                else:
+                    failed_count += 1
+                    log_error("Failed to send accountability check-in", user_id=user['id'])
+                    
+            except Exception as user_error:
+                failed_count += 1
+                log_error("Error processing user for accountability check-in", 
+                         user_id=user.get('id', 'unknown'), 
+                         error=str(user_error))
+                
+        log_info("Accountability check-ins completed", 
+                sent=sent_count, 
+                failed=failed_count, 
+                total_users=len(users_with_plans))
+        
+        return {"sent": sent_count, "failed": failed_count, "total_users": len(users_with_plans)}
+        
+    except Exception as e:
+        log_error("Accountability check-ins task failed", error=str(e))
+        raise self.retry(countdown=300, max_retries=3)  # Retry in 5 minutes
+
+@shared_task(bind=True, max_retries=3)  
+def send_weekly_accountability_summaries(self):
+    """Send weekly accountability summaries"""
+    try:
+        log_info("Starting weekly accountability summaries task")
+        
+        supabase_service, ai_coach_service, whatsapp_service = get_services()
+        
+        # Get week start (Monday)
+        today = datetime.now().date()
+        week_start = (today - timedelta(days=today.weekday())).strftime('%Y-%m-%d')
+        
+        # Get active users
+        active_users = asyncio.run(supabase_service.get_active_subscribers())
+        
+        sent_count = 0
+        failed_count = 0
+        
+        for user in active_users:
+            try:
+                if not user.get('wa_id'):
+                    continue
+                    
+                # Generate weekly summary
+                summary = asyncio.run(
+                    ai_coach_service.generate_weekly_accountability_summary(user['id'], week_start)
+                )
+                
+                if summary and user.get('wa_id'):
+                    success = asyncio.run(whatsapp_service.send_message(
+                        to=user['wa_id'],
+                        message=summary
+                    ))
+                    
+                    if success:
+                        sent_count += 1
+                        log_info("Weekly accountability summary sent", user_id=user['id'])
+                        
+                        # Log the interaction
+                        asyncio.run(supabase_service.log_conversation(
+                            subscriber_id=user['id'],
+                            content=summary,
+                            message_type="assistant",
+                            context_used={"interaction_type": "weekly_accountability_summary", "week_start": week_start}
+                        ))
+                    else:
+                        failed_count += 1
+                        log_error("Failed to send weekly summary", user_id=user['id'])
+                        
+            except Exception as user_error:
+                failed_count += 1
+                log_error("Error processing user for weekly summary", 
+                         user_id=user.get('id', 'unknown'), 
+                         error=str(user_error))
+                
+        log_info("Weekly accountability summaries completed", 
+                sent=sent_count, 
+                failed=failed_count, 
+                total_users=len(active_users))
+        
+        return {"sent": sent_count, "failed": failed_count, "total_users": len(active_users)}
+        
+    except Exception as e:
+        log_error("Weekly accountability summaries task failed", error=str(e))
+        raise self.retry(countdown=300, max_retries=3)
+
+# Helper function for accountability tasks
+async def get_users_with_daily_plans(supabase_service: SupabaseService, date: str) -> List[Dict]:
+    """Get users who created daily plans for a specific date"""
+    try:
+        # Use raw SQL to find users with daily plans for today
+        sql = f"""
+        SELECT DISTINCT s.id, s.wa_id, s.email, s.preferences
+        FROM subscribers s
+        INNER JOIN daily_plans dp ON s.id = dp.subscriber_id
+        WHERE s.status = 'active' 
+        AND dp.plan_date = '{date}'
+        AND s.wa_id IS NOT NULL
+        """
+        
+        result = supabase_service.client.rpc("execute_raw_sql", {"query": sql}).execute()
+        return result.data if result.data else []
+        
+    except Exception as e:
+        log_error("Error getting users with daily plans", date=date, error=str(e))
+        return []
+
 # END OF FILE - All old implementations removed and replaced with new driver+dispatcher architecture

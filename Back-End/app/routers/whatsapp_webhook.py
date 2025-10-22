@@ -15,12 +15,17 @@ from app.services.whatsapp_service import WhatsAppService
 from app.services.supabase_client import SupabaseService
 from app.services.onboarding_service import OnboardingService
 from app.services.timezone_service import TimezoneService
+from app.services.ai_coach import AICoachService
 from app.logging_config import get_logger
 
 # Configure structured logging
 logger = get_logger("app.webhooks.whatsapp")
 
 router = APIRouter()
+
+def create_response(message: str) -> Dict[str, str]:
+    """Create a simple response for webhook processing"""
+    return {"status": "success", "message": message}
 
 def extract_client_ip(request: Request) -> str:
     """Extract real client IP from request headers"""
@@ -416,7 +421,48 @@ async def handle_coaching_message_with_subscription(
             intent_date = pending_intent.get("date")
             
             if intent == "capture_day_plan":
-                # Parse user's plan response into structured items
+                # Initialize AI coach service with supabase dependency
+                ai_coach_service = AICoachService(supabase_service)
+                
+                # Check if this is just a plan or an accountability response
+                if any(keyword in message_text.lower() for keyword in ['went well', 'challenging', 'completed', 'finished', 'done', 'good', 'bad', 'struggled']):
+                    # This looks like an accountability response, process it
+                    coaching_response = await ai_coach_service.process_accountability_response(
+                        user_id=subscription["id"],
+                        response_text=message_text,
+                        date=intent_date
+                    )
+                    
+                    await whatsapp_service.send_message(
+                        phone_number=subscription["wa_id"],
+                        message=coaching_response
+                    )
+                    
+                    # Clear the pending intent
+                    await supabase_service.clear_pending_intent(subscription["id"])
+                    
+                    logger.info(f"Processed accountability response for user {subscription['id']}")
+                    return create_response("Accountability response processed")
+                else:
+                    # This is a new daily plan, summarize it
+                    plan_summary = await ai_coach_service.summarize_daily_plan(
+                        user_input=message_text,
+                        user_id=subscription["id"]
+                    )
+                    
+                    # Send the summary message
+                    await whatsapp_service.send_message(
+                        phone_number=subscription["wa_id"],
+                        message=plan_summary["summary_message"]
+                    )
+                    
+                    # Clear the pending intent
+                    await supabase_service.clear_pending_intent(subscription["id"])
+                    
+                    logger.info(f"Daily plan summarized for user {subscription['id']}: {len(plan_summary['items'])} items")
+                    return create_response("Daily plan summary sent")
+                
+                # Legacy code (keeping for backward compatibility)
                 plan_items = supabase_service.parse_daily_plan_items(message_text)
                 
                 if plan_items:
@@ -474,7 +520,37 @@ async def handle_coaching_message_with_subscription(
                     logger.info(f"No valid plan items parsed from user message: {message_text}")
                     
             elif intent == "capture_task_completion":
-                # Parse which tasks were completed (e.g., "1,3" or "1 and 3" or "just 2")
+                # Initialize AI coach service with supabase dependency
+                ai_coach_service = AICoachService(supabase_service)
+                
+                # Use the new accountability response processing
+                coaching_response = await ai_coach_service.process_accountability_response(
+                    user_id=subscription["id"],
+                    response_text=message_text,
+                    date=intent_date
+                )
+                
+                # Send response immediately
+                await whatsapp_service.send_message(
+                    phone_number=subscription["wa_id"],
+                    message=coaching_response
+                )
+                
+                # Store response in conversation log
+                await supabase_service.log_conversation(
+                    subscriber_id=subscription["id"],
+                    content=coaching_response,
+                    message_type="assistant",
+                    context_used={"interaction_type": "accountability_checkin", "date": intent_date}
+                )
+                
+                # Clear the pending intent
+                await supabase_service.clear_pending_intent(subscription["id"])
+                
+                logger.info(f"Processed accountability completion for user {subscription['id']}")
+                return create_response("Accountability completion processed")
+                
+                # Legacy code (keeping for backward compatibility)
                 completed_items = supabase_service.parse_task_completion(message_text)
                 
                 if completed_items:
