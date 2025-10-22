@@ -468,18 +468,19 @@ def send_weekly_accountability_summaries(self):
 async def get_users_with_daily_plans(supabase_service: SupabaseService, date: str) -> List[Dict]:
     """Get users who created daily plans for a specific date"""
     try:
-        # Use raw SQL to find users with daily plans for today
-        sql = f"""
-        SELECT DISTINCT s.id, s.wa_id, s.email, s.preferences
-        FROM subscribers s
-        INNER JOIN daily_plans dp ON s.id = dp.subscriber_id
-        WHERE s.status = 'active' 
-        AND dp.plan_date = '{date}'
-        AND s.wa_id IS NOT NULL
-        """
+        # Use regular Supabase queries instead of raw SQL to avoid type issues
+        daily_plans = supabase_service.client.table("daily_plans").select("subscriber_id").eq("plan_date", date).execute()
         
-        result = supabase_service.client.rpc("execute_raw_sql", {"query": sql}).execute()
-        return result.data if result.data else []
+        if not daily_plans.data:
+            return []
+        
+        # Get unique subscriber IDs
+        subscriber_ids = list(set(plan["subscriber_id"] for plan in daily_plans.data))
+        
+        # Get active subscribers with WhatsApp IDs
+        subscribers = supabase_service.client.table("subscribers").select("id, wa_id, email, preferences").in_("id", subscriber_ids).eq("status", "active").not_.is_("wa_id", "null").execute()
+        
+        return subscribers.data if subscribers.data else []
         
     except Exception as e:
         log_error("Error getting users with daily plans", date=date, error=str(e))

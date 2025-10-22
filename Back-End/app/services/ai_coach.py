@@ -1630,7 +1630,7 @@ Guidelines:
 - Always include the follow-up promise
 """
 
-            response = await self.openai_client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -1764,7 +1764,7 @@ Avoid: Being preachy, giving too much advice, dwelling on failures
                 items_list = "\n".join([f"- {item}" for item in daily_plan['items']])
                 context_str = f"User's original plan:\n{items_list}\n\n"
             
-            response = await self.openai_client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -1849,7 +1849,7 @@ Days with plans: {len(plans)}
 Days with check-ins: {len(checkins)}
 """
 
-            response = await self.openai_client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
