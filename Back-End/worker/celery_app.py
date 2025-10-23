@@ -159,11 +159,8 @@ celery_app.conf.beat_schedule = {
     # Accountability check-ins now handled by personalized message system
     # Removed scheduled task to prevent duplicate generic messages
     
-    # Weekly accountability summaries (Sunday at 6 PM UTC)
-    'send-weekly-accountability-summaries': {
-        'task': 'worker.tasks.daily_messages.send_weekly_accountability_summaries',
-        'schedule': crontab(day_of_week=0, hour=18, minute=0),  # Sunday 6 PM UTC
-    },
+    # Weekly accountability summaries now handled by personalized message system
+    # Removed scheduled task to prevent duplicate generic messages
 }
 
 # Simplified queue configuration - use default queue for all tasks

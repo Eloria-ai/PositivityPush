@@ -1833,12 +1833,13 @@ Avoid: Being preachy, giving too much advice, dwelling on failures
 You are a supportive accountability coach creating a weekly summary.
 
 Create an encouraging weekly reflection that:
-1. Acknowledges the user's effort and planning
+1. Acknowledges the user's effort and planning this week
 2. Celebrates their completion rate positively
 3. Identifies patterns or insights (if any)
-4. Encourages them for the upcoming week
+4. Asks them to share what they want to focus on next week
 5. Keeps it concise and motivating (3-4 sentences max)
 
+Always end with a question asking about their goals for the upcoming week.
 Be genuine, encouraging, and forward-looking.
 """
 
@@ -1847,6 +1848,8 @@ This week the user planned {total_planned} tasks across {len(plans)} days.
 They completed {total_completed} tasks - that's {completion_rate}% completion rate.
 Days with plans: {len(plans)}
 Days with check-ins: {len(checkins)}
+
+Example format: "This week you planned X tasks and completed Y of them (Z% completion rate). [Encouraging comment about their progress]. What would you like to focus on next week?"
 """
 
             response = self.openai_client.chat.completions.create(
@@ -1859,7 +1862,13 @@ Days with check-ins: {len(checkins)}
                 temperature=0.7
             )
             
-            return response.choices[0].message.content.strip()
+            weekly_summary = response.choices[0].message.content.strip()
+            
+            # Set pending intent to capture next week's goals
+            next_week_start = (datetime.now().date() + timedelta(days=7 - datetime.now().weekday())).strftime('%Y-%m-%d')
+            await self.supabase.set_pending_intent(user_id, 'capture_weekly_goals', next_week_start)
+            
+            return weekly_summary
             
         except Exception as e:
             logger.error(f"Error generating weekly accountability summary: {e}")

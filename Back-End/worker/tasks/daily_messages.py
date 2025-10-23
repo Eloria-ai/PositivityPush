@@ -222,7 +222,8 @@ async def _generate_content_by_type(
         elif message_type == 'day_planning':
             return await ai_coach.generate_day_planning(user_id, user_context)
         elif message_type == 'weekly_reflection':
-            return await ai_coach.generate_weekly_reflection(user_id, user_context)
+            # Use the accountability-based method that references previous week's goals
+            return await ai_coach.generate_weekly_accountability_summary(user_id)
         elif message_type == 'midday_boost':
             return await ai_coach.generate_midday_affirmation(user_id, user_context)
         elif message_type == 'evening_wind_down':

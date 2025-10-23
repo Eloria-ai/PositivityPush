@@ -237,6 +237,33 @@ class SupabaseService:
             logger.error(f"Error getting weekly goals for user {user_id}, week {week_start}: {e}")
             return None
     
+    async def store_weekly_goals(self, user_id: str, week_start: str, goals_text: str) -> bool:
+        """Store user's weekly goals for a specific week"""
+        try:
+            # Parse goals text into structured items (similar to daily plans)
+            goals_items = self.parse_daily_plan_items(goals_text)
+            
+            # Insert or update weekly goals
+            data = {
+                "subscriber_id": user_id,
+                "week_start": week_start,
+                "items": goals_items,
+                "source": "user_input",
+                "created_at": "now()"
+            }
+            
+            # Use upsert to handle duplicate week_start for same user
+            result = self.client.table("weekly_goals") \
+                .upsert(data, on_conflict="subscriber_id,week_start") \
+                .execute()
+            
+            logger.info(f"Stored weekly goals for user {user_id}, week {week_start}: {len(goals_items)} items")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error storing weekly goals for user {user_id}, week {week_start}: {e}")
+            return False
+    
     def parse_daily_plan_items(self, user_text: str) -> List[str]:
         """Parse user's daily plan response into structured items"""
         if not user_text:
