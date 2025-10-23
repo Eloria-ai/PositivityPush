@@ -156,11 +156,8 @@ celery_app.conf.beat_schedule = {
         'schedule': crontab(hour=2, minute=0),
     },
     
-    # Accountability check-ins (evening at 7 PM UTC)
-    'send-accountability-checkins': {
-        'task': 'worker.tasks.daily_messages.send_accountability_checkins',
-        'schedule': crontab(hour=19, minute=0),  # 7 PM UTC daily
-    },
+    # Accountability check-ins now handled by personalized message system
+    # Removed scheduled task to prevent duplicate generic messages
     
     # Weekly accountability summaries (Sunday at 6 PM UTC)
     'send-weekly-accountability-summaries': {

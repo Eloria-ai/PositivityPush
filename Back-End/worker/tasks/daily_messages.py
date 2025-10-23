@@ -216,7 +216,9 @@ async def _generate_content_by_type(
         elif message_type == 'gratitude_prompt':
             return await ai_coach.generate_gratitude_prompt(user_id, user_context)
         elif message_type == 'accountability_checkin':
-            return await ai_coach.generate_accountability_checkin(user_id, user_context)
+            # Use the date-based method that references daily plans
+            today_date = datetime.now().strftime('%Y-%m-%d')
+            return await ai_coach.generate_accountability_checkin(user_id, today_date)
         elif message_type == 'day_planning':
             return await ai_coach.generate_day_planning(user_id, user_context)
         elif message_type == 'weekly_reflection':
