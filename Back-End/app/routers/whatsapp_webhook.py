@@ -434,7 +434,7 @@ async def handle_coaching_message_with_subscription(
                     )
                     
                     await whatsapp_service.send_message(
-                        phone_number=subscription["wa_id"],
+                        to=subscription["wa_id"],
                         message=coaching_response
                     )
                     
@@ -452,7 +452,7 @@ async def handle_coaching_message_with_subscription(
                     
                     # Send the summary message
                     await whatsapp_service.send_message(
-                        phone_number=subscription["wa_id"],
+                        to=subscription["wa_id"],
                         message=plan_summary["summary_message"]
                     )
                     
@@ -497,7 +497,7 @@ async def handle_coaching_message_with_subscription(
                     
                     # Send acknowledgment immediately (don't wait for async task)
                     await whatsapp_service.send_message(
-                        phone_number=subscription["wa_id"],
+                        to=subscription["wa_id"],
                         message=acknowledgment
                     )
                     
@@ -532,7 +532,7 @@ async def handle_coaching_message_with_subscription(
                 
                 # Send response immediately
                 await whatsapp_service.send_message(
-                    phone_number=subscription["wa_id"],
+                    to=subscription["wa_id"],
                     message=coaching_response
                 )
                 
@@ -582,7 +582,7 @@ async def handle_coaching_message_with_subscription(
                     
                     # Send completion response immediately
                     await whatsapp_service.send_message(
-                        phone_number=subscription["wa_id"],
+                        to=subscription["wa_id"],
                         message=completion_response
                     )
                     
