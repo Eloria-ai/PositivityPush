@@ -604,39 +604,43 @@ async def handle_coaching_message_with_subscription(
                 else:
                     logger.info(f"No valid completion items parsed from user message: {message_text}")
                     
-            elif intent == "capture_weekly_goals":
+            elif intent == "capture_weekly_reflection":
                 # Initialize AI coach service with supabase dependency
                 ai_coach_service = AICoachService(supabase_service)
                 
-                # Store the weekly goals for next week
-                await supabase_service.store_weekly_goals(
+                # Store the weekly reflection response
+                await supabase_service.store_weekly_reflection(
                     user_id=subscription["id"],
                     week_start=intent_date,
-                    goals_text=message_text
+                    reflection_text=message_text
                 )
                 
-                # Generate acknowledgment response
-                acknowledgment_response = f"Got it! I've noted your goals for next week: {message_text}. I'll check in with you on your progress. Have a great week ahead!"
+                # Generate follow-up coaching response using AI
+                follow_up_response = await ai_coach_service.process_weekly_reflection_response(
+                    user_id=subscription["id"],
+                    reflection_text=message_text,
+                    week_start=intent_date
+                )
                 
-                # Send acknowledgment immediately
+                # Send follow-up immediately
                 await whatsapp_service.send_message(
                     to=subscription["wa_id"],
-                    message=acknowledgment_response
+                    message=follow_up_response
                 )
                 
-                # Store acknowledgment in conversation log
+                # Store follow-up in conversation log
                 await supabase_service.log_conversation(
                     subscriber_id=subscription["id"],
-                    content=acknowledgment_response,
+                    content=follow_up_response,
                     message_type="assistant",
-                    context_used={"interaction_type": "weekly_goals_capture", "week_start": intent_date}
+                    context_used={"interaction_type": "weekly_reflection_followup", "week_start": intent_date}
                 )
                 
                 # Clear the pending intent
                 await supabase_service.clear_pending_intent(subscription["id"])
                 
-                logger.info(f"Captured weekly goals for user {subscription['id']}: {message_text}")
-                return create_response("Weekly goals captured")
+                logger.info(f"Processed weekly reflection for user {subscription['id']}: {message_text}")
+                return create_response("Weekly reflection processed")
         
         # Dispatch AI response generation to background task (prevents webhook timeout)
         from worker.tasks.ai_coach_async import send_ai_coach_response_async

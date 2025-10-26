@@ -222,8 +222,8 @@ async def _generate_content_by_type(
         elif message_type == 'day_planning':
             return await ai_coach.generate_day_planning(user_id, user_context)
         elif message_type == 'weekly_reflection':
-            # Use the accountability-based method that references previous week's goals
-            return await ai_coach.generate_weekly_accountability_summary(user_id)
+            # Use introspective reflection method focused on personal growth themes
+            return await ai_coach.generate_weekly_introspective_reflection(user_id)
         elif message_type == 'midday_boost':
             return await ai_coach.generate_midday_affirmation(user_id, user_context)
         elif message_type == 'evening_wind_down':
@@ -401,71 +401,9 @@ def send_accountability_checkins(self):
         log_error("Accountability check-ins task failed", error=str(e))
         raise self.retry(countdown=300, max_retries=3)  # Retry in 5 minutes
 
-@shared_task(bind=True, max_retries=3)  
-def send_weekly_accountability_summaries(self):
-    """Send weekly accountability summaries"""
-    try:
-        log_info("Starting weekly accountability summaries task")
-        
-        supabase_service, ai_coach_service, whatsapp_service = get_services()
-        
-        # Get week start (Monday)
-        today = datetime.now().date()
-        week_start = (today - timedelta(days=today.weekday())).strftime('%Y-%m-%d')
-        
-        # Get active users
-        active_users = asyncio.run(supabase_service.get_active_subscribers())
-        
-        sent_count = 0
-        failed_count = 0
-        
-        for user in active_users:
-            try:
-                if not user.get('wa_id'):
-                    continue
-                    
-                # Generate weekly summary
-                summary = asyncio.run(
-                    ai_coach_service.generate_weekly_accountability_summary(user['id'], week_start)
-                )
-                
-                if summary and user.get('wa_id'):
-                    success = asyncio.run(whatsapp_service.send_message(
-                        to=user['wa_id'],
-                        message=summary
-                    ))
-                    
-                    if success:
-                        sent_count += 1
-                        log_info("Weekly accountability summary sent", user_id=user['id'])
-                        
-                        # Log the interaction
-                        asyncio.run(supabase_service.log_conversation(
-                            subscriber_id=user['id'],
-                            content=summary,
-                            message_type="assistant",
-                            context_used={"interaction_type": "weekly_accountability_summary", "week_start": week_start}
-                        ))
-                    else:
-                        failed_count += 1
-                        log_error("Failed to send weekly summary", user_id=user['id'])
-                        
-            except Exception as user_error:
-                failed_count += 1
-                log_error("Error processing user for weekly summary", 
-                         user_id=user.get('id', 'unknown'), 
-                         error=str(user_error))
-                
-        log_info("Weekly accountability summaries completed", 
-                sent=sent_count, 
-                failed=failed_count, 
-                total_users=len(active_users))
-        
-        return {"sent": sent_count, "failed": failed_count, "total_users": len(active_users)}
-        
-    except Exception as e:
-        log_error("Weekly accountability summaries task failed", error=str(e))
-        raise self.retry(countdown=300, max_retries=3)
+# OLD WEEKLY ACCOUNTABILITY TASK REMOVED
+# Weekly reflections are now handled by the personalized message system
+# using generate_weekly_introspective_reflection() method
 
 # Helper function for accountability tasks
 async def get_users_with_daily_plans(supabase_service: SupabaseService, date: str) -> List[Dict]:

@@ -136,6 +136,20 @@ CREATE TABLE IF NOT EXISTS weekly_goals (
     UNIQUE(subscriber_id, week_start)
 );
 
+-- Weekly Reflections table (introspective weekly check-ins)
+CREATE TABLE IF NOT EXISTS weekly_reflections (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    subscriber_id UUID REFERENCES subscribers(id) ON DELETE CASCADE,
+    week_start DATE NOT NULL, -- Monday of the week
+    theme VARCHAR(255), -- The reflection theme/intention for that week
+    intention TEXT, -- What they wanted to focus on that week
+    reflection_response TEXT, -- Their actual reflection response
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Prevent duplicates - one reflection per user per week
+    UNIQUE(subscriber_id, week_start)
+);
+
 -- Scheduled Messages table (UUID-based architecture)
 -- NOTE: IF NOT EXISTS preserves existing UUID column if table already exists
 CREATE TABLE IF NOT EXISTS scheduled_messages (

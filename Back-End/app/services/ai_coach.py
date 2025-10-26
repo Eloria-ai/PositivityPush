@@ -1797,79 +1797,146 @@ Avoid: Being preachy, giving too much advice, dwelling on failures
             logger.error(f"Error processing accountability response: {e}")
             return "Thanks for sharing how your day went! Every step forward is progress. Keep up the great work! 💪"
 
-    async def generate_weekly_accountability_summary(self, user_id: str, week_start: str = None) -> str:
-        """Generate weekly accountability summary based on week's plans and completions"""
+    async def generate_weekly_introspective_reflection(self, user_id: str) -> str:
+        """Generate introspective weekly reflection based on previous week's reflection theme"""
         try:
             if not self.supabase:
-                return "Hope you had a great week! Take some time to reflect on your wins and areas for growth."
+                return "Take a moment to reflect on this past week. What's one thing you're grateful for that happened?"
             
-            if not week_start:
-                # Calculate current week start (Monday)
-                today = datetime.now().date()
-                week_start = (today - timedelta(days=today.weekday())).strftime('%Y-%m-%d')
+            # Calculate previous week start (Monday of last week)
+            today = datetime.now().date()
+            last_week_start = (today - timedelta(days=today.weekday() + 7)).strftime('%Y-%m-%d')
             
-            # Get week's accountability data using existing method
-            weekly_data = await self.supabase.get_weekly_accountability_summary(user_id, week_start)
+            # Get user's previous weekly reflection/intention
+            previous_reflection = await self.supabase.get_weekly_reflection(user_id, last_week_start)
             
-            plans = weekly_data.get('plans', [])
-            checkins = weekly_data.get('checkins', [])
+            if not previous_reflection:
+                # First time or no previous reflection - start with a general theme
+                return await self._generate_first_weekly_reflection(user_id)
             
-            if not plans:
-                return "Hope you had a great week! Take some time to reflect on your wins and areas for growth."
+            previous_theme = previous_reflection.get('theme', '')
+            previous_intention = previous_reflection.get('intention', '')
             
-            # Analyze the week's data
-            total_planned = sum(len(plan.get('items', [])) for plan in plans)
-            total_completed = 0
-            
-            for plan in plans:
-                completion_status = plan.get('completion_status', [])
-                if completion_status:
-                    total_completed += sum(1 for item in completion_status if item.get('completed', False))
-            
-            completion_rate = int((total_completed / total_planned * 100)) if total_planned > 0 else 0
-            
-            # Generate summary using AI
+            # Generate reflective check-in based on previous week's intention
             system_prompt = """
-You are a supportive accountability coach creating a weekly summary.
+You are a gentle, introspective life coach facilitating weekly self-reflection.
 
-Create an encouraging weekly reflection that:
-1. Acknowledges the user's effort and planning this week
-2. Celebrates their completion rate positively
-3. Identifies patterns or insights (if any)
-4. Asks them to share what they want to focus on next week
-5. Keeps it concise and motivating (3-4 sentences max)
+Create a warm, thoughtful reflection prompt that:
+1. References what they wanted to focus on last week (their intention/theme)
+2. Gently asks how that went for them this week
+3. Uses a curious, non-judgmental tone
+4. Keeps it personal and introspective (not task-focused)
+5. One simple, open question that invites honest reflection
 
-Always end with a question asking about their goals for the upcoming week.
-Be genuine, encouraging, and forward-looking.
+Examples of good reflection prompts:
+- "Last week you wanted to practice more gratitude. How did that feel for you this week?"
+- "You mentioned wanting to be more present with loved ones. What did you notice about yourself in those moments this week?"
+- "You set an intention to be kinder to yourself. What came up for you as you tried that?"
+
+Be gentle, curious, and focused on inner experience rather than external achievements.
 """
 
             context = f"""
-This week the user planned {total_planned} tasks across {len(plans)} days.
-They completed {total_completed} tasks - that's {completion_rate}% completion rate.
-Days with plans: {len(plans)}
-Days with check-ins: {len(checkins)}
-
-Example format: "This week you planned X tasks and completed Y of them (Z% completion rate). [Encouraging comment about their progress]. What would you like to focus on next week?"
+Previous week's intention/theme: {previous_intention or previous_theme}
+Generate a gentle reflection prompt asking how that intention went for them this week.
 """
 
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Create a weekly summary based on: {context}"}
+                    {"role": "user", "content": context}
                 ],
-                max_tokens=200,
+                max_tokens=100,
+                temperature=0.6
+            )
+            
+            reflection_prompt = response.choices[0].message.content.strip()
+            
+            # Set pending intent to capture their reflection response
+            current_week_start = (today - timedelta(days=today.weekday())).strftime('%Y-%m-%d')
+            await self.supabase.set_pending_intent(user_id, 'capture_weekly_reflection', current_week_start)
+            
+            return reflection_prompt
+            
+        except Exception as e:
+            logger.error(f"Error generating weekly introspective reflection: {e}")
+            return "Take a moment to reflect on this past week. What's one thing you're grateful for that happened?"
+    
+    async def _generate_first_weekly_reflection(self, user_id: str) -> str:
+        """Generate first-time weekly reflection prompt"""
+        prompts = [
+            "Take a moment to reflect on this past week. What's one thing you're grateful for that happened?",
+            "As you look back on this week, what's something you learned about yourself?",
+            "What brought you the most joy this week, even if it was something small?",
+            "Thinking about this past week, what's one thing you're proud of yourself for?",
+            "What's been on your mind lately that you'd like to reflect on?"
+        ]
+        
+        import random
+        selected_prompt = random.choice(prompts)
+        
+        # Set pending intent for their response
+        today = datetime.now().date()
+        current_week_start = (today - timedelta(days=today.weekday())).strftime('%Y-%m-%d')
+        await self.supabase.set_pending_intent(user_id, 'capture_weekly_reflection', current_week_start)
+        
+        return selected_prompt
+    
+    async def process_weekly_reflection_response(self, user_id: str, reflection_text: str, week_start: str) -> str:
+        """Process user's weekly reflection response and generate supportive follow-up"""
+        try:
+            # Generate empathetic, coaching follow-up response
+            system_prompt = """
+You are a gentle, wise life coach responding to someone's weekly reflection.
+
+Create a supportive follow-up that:
+1. Acknowledges what they shared with empathy
+2. Reflects back what you heard (validation)
+3. Asks a gentle, curious follow-up question to deepen their reflection
+4. Focuses on their inner experience and growth
+5. Uses a warm, non-judgmental tone
+6. Keeps it concise (2-3 sentences max)
+
+Examples of good follow-ups:
+- "That sounds like it was both challenging and meaningful for you. What do you think helped you show up that way?"
+- "I can hear the intention behind your efforts. What did you learn about yourself in those moments?"
+- "It sounds like you're being really honest with yourself. What's one small thing that might support you in this area next week?"
+
+Be curious, validating, and focused on their personal growth journey.
+"""
+
+            context = f"""
+The user shared this reflection: "{reflection_text}"
+
+Generate a supportive, curious follow-up response that validates their sharing and asks a gentle question to deepen their reflection.
+"""
+
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": context}
+                ],
+                max_tokens=150,
                 temperature=0.7
             )
             
-            weekly_summary = response.choices[0].message.content.strip()
+            follow_up = response.choices[0].message.content.strip()
             
-            # Set pending intent to capture next week's goals
-            next_week_start = (datetime.now().date() + timedelta(days=7 - datetime.now().weekday())).strftime('%Y-%m-%d')
-            await self.supabase.set_pending_intent(user_id, 'capture_weekly_goals', next_week_start)
+            # Store this interaction in mem0 for future reference
+            reflection_memory = [
+                {"role": "user", "content": f"Weekly reflection: {reflection_text}"},
+                {"role": "assistant", "content": follow_up}
+            ]
+            await self.mem0_service.add_memory(
+                messages=reflection_memory,
+                user_id=user_id,
+                metadata={"interaction_type": "weekly_reflection", "week_start": week_start}
+            )
             
-            return weekly_summary
+            return follow_up
             
         except Exception as e:
-            logger.error(f"Error generating weekly accountability summary: {e}")
-            return "Hope you had a great week! Take some time to reflect on your wins and areas for growth."
+            logger.error(f"Error processing weekly reflection response: {e}")
+            return "Thank you for sharing that with me. Your willingness to reflect shows real growth. How are you feeling about the week ahead?"

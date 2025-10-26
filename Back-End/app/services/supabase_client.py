@@ -264,6 +264,43 @@ class SupabaseService:
             logger.error(f"Error storing weekly goals for user {user_id}, week {week_start}: {e}")
             return False
     
+    async def get_weekly_reflection(self, user_id: str, week_start: str) -> Optional[Dict[str, Any]]:
+        """Get user's weekly reflection data for specific week"""
+        try:
+            result = self.client.table("weekly_reflections") \
+                .select("*") \
+                .eq("subscriber_id", user_id) \
+                .eq("week_start", week_start) \
+                .execute()
+            
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting weekly reflection for user {user_id}, week {week_start}: {e}")
+            return None
+    
+    async def store_weekly_reflection(self, user_id: str, week_start: str, reflection_text: str, theme: str = None) -> bool:
+        """Store user's weekly reflection response"""
+        try:
+            data = {
+                "subscriber_id": user_id,
+                "week_start": week_start,
+                "reflection_response": reflection_text,
+                "theme": theme,
+                "created_at": "now()"
+            }
+            
+            # Use upsert to handle duplicate week_start for same user
+            result = self.client.table("weekly_reflections") \
+                .upsert(data, on_conflict="subscriber_id,week_start") \
+                .execute()
+            
+            logger.info(f"Stored weekly reflection for user {user_id}, week {week_start}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error storing weekly reflection for user {user_id}, week {week_start}: {e}")
+            return False
+    
     def parse_daily_plan_items(self, user_text: str) -> List[str]:
         """Parse user's daily plan response into structured items"""
         if not user_text:
@@ -1449,39 +1486,5 @@ Return ONLY the weekday name, nothing else.
             logger.error(f"Error creating immediate test messages: {e}")
             return False
 
-    async def get_weekly_accountability_summary(self, user_id: str, week_start: str) -> Dict[str, Any]:
-        """Get weekly summary of plans and completions for accountability"""
-        try:
-            from datetime import datetime, timedelta
-            
-            # Calculate week end
-            week_start_date = datetime.strptime(week_start, "%Y-%m-%d").date()
-            week_end_date = week_start_date + timedelta(days=6)
-            week_end = week_end_date.strftime("%Y-%m-%d")
-            
-            # Get week's daily plans
-            plans_result = self.client.table("daily_plans").select("*").eq("subscriber_id", user_id).gte("plan_date", week_start).lte("plan_date", week_end).execute()
-            
-            # For now, we don't have a separate checkins table, so we'll check completion_status in daily_plans
-            # This provides the data needed for weekly accountability summaries
-            plans = plans_result.data if plans_result.data else []
-            
-            # Extract completion data from daily plans
-            checkins = []
-            for plan in plans:
-                if plan.get('completion_status') or plan.get('completion_response'):
-                    checkins.append({
-                        'plan_date': plan['plan_date'],
-                        'completion_status': plan.get('completion_status', []),
-                        'completion_response': plan.get('completion_response', ''),
-                        'completed_at': plan.get('completed_at')
-                    })
-            
-            return {
-                "plans": plans,
-                "checkins": checkins
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting weekly accountability summary: {e}")
-            return {"plans": [], "checkins": []}
+    # OLD WEEKLY ACCOUNTABILITY METHOD REMOVED
+    # Weekly reflections now use introspective approach with weekly_reflections table
